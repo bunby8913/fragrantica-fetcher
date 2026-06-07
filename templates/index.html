@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Fragrantica Fetcher</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Perfume Library</p>
+        <h1>Fragrantica Fetcher</h1>
+        <p class="subtitle">Paste a Fragrantica perfume URL to crawl, store, and display fragrance notes.</p>
+      </section>
+
+      <section class="card" aria-label="Perfume database table">
+        <div class="table-toolbar">
+          <div>
+            <h2>Saved Perfumes</h2>
+            <p id="status" class="status">Loading database...</p>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Brand</th>
+                <th>Pyramid</th>
+                <th>Like</th>
+                <th>Description</th>
+                <th>Created</th>
+                <th>Original URL</th>
+              </tr>
+            </thead>
+            <tbody id="perfume-table-body"></tbody>
+            <tfoot>
+              <tr id="new-perfume-row">
+                <td colspan="7">
+                  <form id="add-perfume-form" class="add-form">
+                    <input
+                      id="perfume-url"
+                      name="url"
+                      type="url"
+                      placeholder="Paste a fragrantica.com perfume URL..."
+                      autocomplete="off"
+                      required
+                    >
+                    <button type="submit">Add Perfume</button>
+                  </form>
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
