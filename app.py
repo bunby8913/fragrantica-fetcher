@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import date
 from decimal import Decimal
 from urllib.parse import urlparse
@@ -213,4 +214,5 @@ def create_app() -> Flask:
 
 
 if __name__ == "__main__":
-    create_app().run(host="0.0.0.0", port=5000, debug=True)
+    debug = os.getenv("FLASK_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+    create_app().run(host="0.0.0.0", port=5000, debug=debug)
