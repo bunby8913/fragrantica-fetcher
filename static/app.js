@@ -179,6 +179,22 @@ function updatePerfumeInState(updated) {
   allPerfumes = allPerfumes.map((perfume) => (perfume.id === updated.id ? updated : perfume));
 }
 
+function normalizedRating(value) {
+  const rating = Number(value);
+  if (!Number.isInteger(rating)) return 3;
+  return Math.min(5, Math.max(1, rating));
+}
+
+function updateStarDisplay(container, rating) {
+  const currentRating = normalizedRating(rating);
+  container.dataset.rating = String(currentRating);
+  container.setAttribute("aria-valuenow", String(currentRating));
+  container.setAttribute("aria-label", `Rating ${currentRating} out of 5`);
+  container.querySelectorAll(".rating-star").forEach((star) => {
+    star.classList.toggle("active", Number(star.dataset.value) <= currentRating);
+  });
+}
+
 async function updateNote(perfume, textarea) {
   const note = textarea.value;
   if (note === textarea.dataset.originalValue) return;
@@ -225,6 +241,37 @@ async function updateSize(perfume, select) {
     setStatus(error.message, true);
   } finally {
     select.disabled = false;
+  }
+}
+
+async function updateRating(perfume, container, rating) {
+  const previousRating = normalizedRating(container.dataset.savedRating);
+  const nextRating = normalizedRating(rating);
+  if (nextRating === previousRating) return;
+
+  container.classList.add("saving");
+  container.setAttribute("aria-disabled", "true");
+  updateStarDisplay(container, nextRating);
+
+  try {
+    const response = await fetch(`/perfume/${perfume.id}/rating`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rating: nextRating }),
+    });
+    const updated = await response.json();
+    if (!response.ok) throw new Error(updated.error || "Could not update rating");
+
+    container.dataset.savedRating = String(updated.rating);
+    updatePerfumeInState(updated);
+    updateStarDisplay(container, updated.rating);
+    setStatus(`Updated rating for ${updated.name}.`);
+  } catch (error) {
+    updateStarDisplay(container, previousRating);
+    setStatus(error.message, true);
+  } finally {
+    container.classList.remove("saving");
+    container.setAttribute("aria-disabled", "false");
   }
 }
 
@@ -295,15 +342,28 @@ function renderPerfumeRow(perfume) {
 
   const note = stripHtml(perfume.description).trim();
   const size = Number(perfume.size ?? 0);
+  const rating = normalizedRating(perfume.rating);
 
   row.innerHTML = `
     <td class="name-cell">${escapeHtml(perfume.name)}</td>
     <td class="brand-cell">${escapeHtml(perfume.brand)}</td>
     <td class="pyramid-cell"><div class="pyramid-levels">${renderPyramidHTML(perfume.pyramid_data)}</div></td>
-    <td>
-      <button class="like-button ${perfume.like ? "active" : ""}" type="button" aria-label="Toggle like">
-        ${perfume.like ? "♥" : "♡"}
-      </button>
+    <td class="rating-cell">
+      <div
+        class="rating-stars"
+        role="slider"
+        tabindex="0"
+        aria-valuemin="1"
+        aria-valuemax="5"
+        aria-valuenow="${rating}"
+        aria-label="Rating ${rating} out of 5"
+        data-rating="${rating}"
+        data-saved-rating="${rating}"
+      >
+        ${[1, 2, 3, 4, 5]
+      .map((value) => `<span class="rating-star ${value <= rating ? "active" : ""}" data-value="${value}" aria-hidden="true">★</span>`)
+      .join("")}
+      </div>
     </td>
     <td class="note-cell">
       <select class="note-size-select" aria-label="Size for ${escapeHtml(perfume.name)}">
@@ -318,22 +378,29 @@ function renderPerfumeRow(perfume) {
     <td><button class="delete-button" type="button">Delete</button></td>
   `;
 
-  const likeButton = row.querySelector(".like-button");
-  likeButton.addEventListener("click", async () => {
-    likeButton.disabled = true;
-    try {
-      const response = await fetch(`/perfume/${perfume.id}/like`, { method: "PUT" });
-      const updated = await response.json();
-      if (!response.ok) throw new Error(updated.error || "Could not update like status");
+  const ratingStars = row.querySelector(".rating-stars");
+  ratingStars.addEventListener("click", (event) => {
+    const star = event.target.closest(".rating-star");
+    if (!star || ratingStars.classList.contains("saving")) return;
+    updateRating(perfume, ratingStars, Number(star.dataset.value));
+  });
+  ratingStars.addEventListener("mouseover", (event) => {
+    const star = event.target.closest(".rating-star");
+    if (!star || ratingStars.classList.contains("saving")) return;
+    updateStarDisplay(ratingStars, Number(star.dataset.value));
+  });
+  ratingStars.addEventListener("mouseleave", () => {
+    if (ratingStars.classList.contains("saving")) return;
+    updateStarDisplay(ratingStars, ratingStars.dataset.savedRating);
+  });
+  ratingStars.addEventListener("keydown", (event) => {
+    if (ratingStars.classList.contains("saving")) return;
+    if (!["ArrowLeft", "ArrowDown", "ArrowRight", "ArrowUp"].includes(event.key)) return;
 
-      updatePerfumeInState(updated);
-      likeButton.classList.toggle("active", updated.like);
-      likeButton.textContent = updated.like ? "♥" : "♡";
-    } catch (error) {
-      setStatus(error.message, true);
-    } finally {
-      likeButton.disabled = false;
-    }
+    event.preventDefault();
+    const direction = ["ArrowLeft", "ArrowDown"].includes(event.key) ? -1 : 1;
+    const nextRating = normalizedRating(Number(ratingStars.dataset.savedRating) + direction);
+    updateRating(perfume, ratingStars, nextRating);
   });
 
   const noteInput = row.querySelector(".note-input");

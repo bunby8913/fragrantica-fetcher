@@ -278,6 +278,7 @@ td {
 .note-input:disabled,
 .note-size-select:disabled,
 .size-select:disabled,
+.rating-stars.saving,
 .delete-button:disabled,
 .move-button:disabled,
 .add-form input:read-only {
@@ -317,26 +318,45 @@ td {
   text-decoration: underline;
 }
 
-.like-button {
-  width: 40px;
-  height: 40px;
-  border: 0;
+.rating-cell {
+  min-width: 150px;
+}
+
+.rating-stars {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
   border-radius: 999px;
+  padding: 8px 10px;
   background: var(--panel-solid);
-  box-shadow: 7px 7px 16px rgba(95, 102, 121, 0.2), -7px -7px 16px rgba(255, 255, 255, 0.9);
-  color: #9aa0ad;
+  box-shadow: 7px 7px 16px rgba(95, 102, 121, 0.16), -7px -7px 16px rgba(255, 255, 255, 0.88);
   cursor: pointer;
-  font-size: 1.2rem;
-  transition: transform 160ms ease, color 160ms ease, box-shadow 160ms ease;
+  outline: none;
+  user-select: none;
+  transition: box-shadow 160ms ease, transform 160ms ease;
 }
 
-.like-button:hover {
+.rating-stars:hover,
+.rating-stars:focus {
+  transform: translateY(-1px);
+  box-shadow: 7px 7px 16px rgba(95, 102, 121, 0.18), -7px -7px 16px rgba(255, 255, 255, 0.92), 0 0 0 3px rgba(118, 87, 255, 0.14);
+}
+
+.rating-star {
+  color: #c4c8d2;
+  font-size: 1.18rem;
+  line-height: 1;
+  text-shadow: 1px 1px 1px rgba(255, 255, 255, 0.9);
+  transition: color 140ms ease, transform 140ms ease;
+}
+
+.rating-star.active {
+  color: var(--accent);
+}
+
+.rating-stars:hover .rating-star.active,
+.rating-stars:focus .rating-star.active {
   transform: scale(1.08);
-}
-
-.like-button.active {
-  color: var(--accent-2);
-  box-shadow: inset 5px 5px 12px rgba(95, 102, 121, 0.18), inset -5px -5px 12px rgba(255, 255, 255, 0.92);
 }
 
 .delete-button {

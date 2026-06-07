@@ -1,5 +1,6 @@
 import json
 from datetime import date
+from decimal import Decimal
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -15,7 +16,7 @@ from db import (
     get_wishlist,
     move_to_library,
     run_migrations,
-    toggle_like,
+    update_rating,
     update_note,
     update_size,
 )
@@ -32,6 +33,8 @@ def _json_ready(row: dict) -> dict:
     for key, value in result.items():
         if isinstance(value, date):
             result[key] = value.isoformat()
+        elif isinstance(value, Decimal):
+            result[key] = int(value) if value == value.to_integral_value() else float(value)
     return result
 
 
@@ -127,9 +130,24 @@ def add_to_wishlist_api():
     return jsonify(_json_ready(row)), 201
 
 
-@app.put("/perfume/<int:perfume_id>/like")
-def toggle_like_api(perfume_id: int):
-    row = toggle_like(perfume_id)
+@app.put("/perfume/<int:perfume_id>/rating")
+def update_rating_api(perfume_id: int):
+    payload = request.get_json(silent=True) or {}
+    rating_value = payload.get("rating")
+    if isinstance(rating_value, bool) or (
+        isinstance(rating_value, float) and not rating_value.is_integer()
+    ):
+        return jsonify({"error": "Rating must be a whole number from 1 to 5"}), 400
+
+    try:
+        rating = int(rating_value)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Rating must be a whole number from 1 to 5"}), 400
+
+    if rating not in {1, 2, 3, 4, 5}:
+        return jsonify({"error": "Rating must be a whole number from 1 to 5"}), 400
+
+    row = update_rating(perfume_id, rating)
     if not row:
         return jsonify({"error": "Perfume not found"}), 404
     return jsonify(_json_ready(row))

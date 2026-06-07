@@ -40,11 +40,68 @@ def run_migrations() -> None:
                     name VARCHAR NOT NULL,
                     brand VARCHAR NOT NULL,
                     pyramid_data TEXT,
-                    "like" BOOLEAN DEFAULT FALSE,
+                    rating INT DEFAULT 3,
                     description TEXT,
                     creation_date DATE DEFAULT CURRENT_DATE,
                     original_address VARCHAR
                 );
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE perfume
+                DROP COLUMN IF EXISTS "like";
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE perfume
+                ADD COLUMN IF NOT EXISTS rating INT DEFAULT 3;
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE perfume
+                ALTER COLUMN rating TYPE INT USING GREATEST(1, LEAST(5, COALESCE(rating, 3))),
+                ALTER COLUMN rating SET DEFAULT 3;
+                """
+            )
+            cur.execute(
+                """
+                UPDATE perfume
+                SET rating = 3
+                WHERE rating IS NULL OR rating < 1 OR rating > 5;
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE perfume
+                ALTER COLUMN rating SET NOT NULL;
+                """
+            )
+            cur.execute(
+                """
+                DO $$
+                DECLARE
+                    rec record;
+                BEGIN
+                    FOR rec IN
+                        SELECT con.conname
+                        FROM pg_constraint con
+                        JOIN pg_class rel ON rel.oid = con.conrelid
+                        JOIN pg_attribute attr
+                          ON attr.attrelid = rel.oid
+                         AND attr.attname = 'rating'
+                        WHERE rel.relname = 'perfume'
+                          AND con.contype = 'c'
+                          AND attr.attnum = ANY(con.conkey)
+                    LOOP
+                        EXECUTE 'ALTER TABLE perfume DROP CONSTRAINT ' || quote_ident(rec.conname);
+                    END LOOP;
+
+                    ALTER TABLE perfume
+                    ADD CONSTRAINT perfume_rating_check CHECK (rating >= 1 AND rating <= 5);
+                END $$;
                 """
             )
             cur.execute(
@@ -177,7 +234,7 @@ def add_perfume(
                         name,
                         brand,
                         pyramid_data,
-                        "like",
+                        rating,
                         description,
                         creation_date,
                         original_address,
@@ -200,7 +257,7 @@ def get_all_perfumes() -> list[dict]:
                     name,
                     brand,
                     pyramid_data,
-                    "like",
+                    rating,
                     description,
                     creation_date,
                     original_address,
@@ -212,26 +269,26 @@ def get_all_perfumes() -> list[dict]:
             return [dict(row) for row in cur.fetchall()]
 
 
-def toggle_like(perfume_id: int) -> dict | None:
+def update_rating(perfume_id: int, rating: int) -> dict | None:
     with get_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
                 UPDATE perfume
-                SET "like" = NOT COALESCE("like", FALSE)
+                SET rating = %s
                 WHERE id = %s
                 RETURNING
                     id,
                     name,
                     brand,
                     pyramid_data,
-                    "like",
+                    rating,
                     description,
                     creation_date,
                     original_address,
                     size;
                 """,
-                (perfume_id,),
+                (rating, perfume_id),
             )
             row = cur.fetchone()
             return dict(row) if row else None
@@ -250,7 +307,7 @@ def update_note(perfume_id: int, note: str) -> dict | None:
                     name,
                     brand,
                     pyramid_data,
-                    "like",
+                    rating,
                     description,
                     creation_date,
                     original_address,
@@ -275,7 +332,7 @@ def update_size(perfume_id: int, size: int) -> dict | None:
                     name,
                     brand,
                     pyramid_data,
-                    "like",
+                    rating,
                     description,
                     creation_date,
                     original_address,
@@ -382,7 +439,7 @@ def move_to_library(wishlist_id: int) -> dict | None:
                         name,
                         brand,
                         pyramid_data,
-                        "like",
+                        rating,
                         description,
                         creation_date,
                         original_address,
