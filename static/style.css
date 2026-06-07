@@ -261,7 +261,7 @@ td {
   overflow: hidden;
   resize: none;
   border: 0;
-  border-radius: 14px;
+  border-radius: 8px;
   padding: 10px 12px;
   background: rgba(237, 240, 246, 0.86);
   box-shadow: inset 5px 5px 12px rgba(95, 102, 121, 0.12), inset -5px -5px 12px rgba(255, 255, 255, 0.85);
