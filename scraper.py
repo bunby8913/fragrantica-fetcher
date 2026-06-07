@@ -28,10 +28,8 @@ def extract_perfume_data(html: str, url: str) -> dict:
     """Extract all perfume data from the HTML."""
     soup = BeautifulSoup(html, "lxml")
 
-    name = _extract_name(soup)
     brand = _extract_brand(soup)
-    perfumer = _extract_perfumer(soup)
-    description = _extract_description(soup)
+    name = _extract_name(soup, brand)
     rating_value = _extract_rating_value(soup)
     rating_count = _extract_rating_count(soup)
     accords = _extract_accords(soup)
@@ -42,8 +40,6 @@ def extract_perfume_data(html: str, url: str) -> dict:
         "id": perfume_id,
         "name": name,
         "brand": brand,
-        "perfumer": perfumer,
-        "description": description,
         "rating_value": rating_value,
         "rating_count": rating_count,
         "main_accords": accords,
@@ -52,7 +48,7 @@ def extract_perfume_data(html: str, url: str) -> dict:
     }
 
 
-def _extract_name(soup: BeautifulSoup) -> str:
+def _extract_name(soup: BeautifulSoup, brand: str = "") -> str:
     el = soup.select_one('h1[itemprop="name"]')
     if not el:
         return ""
@@ -60,43 +56,15 @@ def _extract_name(soup: BeautifulSoup) -> str:
     span = el.select_one("span")
     if span:
         full = full.replace(span.get_text(strip=True), "").strip()
+    if brand:
+        full = re.sub(re.escape(brand), "", full, flags=re.IGNORECASE).strip()
+    full = re.sub(r"\s+", " ", full)
     return full
 
 
 def _extract_brand(soup: BeautifulSoup) -> str:
     el = soup.select_one('[itemprop="brand"] [itemprop="name"]')
     return el.get_text(strip=True) if el else ""
-
-
-def _extract_perfumer(soup: BeautifulSoup) -> str:
-    desc_el = soup.select_one('[itemprop="description"] p')
-    if desc_el:
-        text = desc_el.get_text(strip=True)
-        m = re.search(
-            r"(?:nose behind this fragrance is|created by)\s+(.*?)(?:\.|$)",
-            text,
-            re.IGNORECASE,
-        )
-        if m:
-            return m.group(1).strip()
-
-    heading = soup.find("h3", string=re.compile(r"Perfumer", re.I))
-    if heading:
-        parent = heading.find_parent("div")
-        if parent:
-            spans = parent.select("a span")
-            if spans:
-                return ", ".join(s.get_text(strip=True) for s in spans)
-    return ""
-
-
-def _extract_description(soup: BeautifulSoup) -> str:
-    el = soup.select_one('[itemprop="description"]')
-    if not el:
-        return ""
-    for tag in el.select("script, style"):
-        tag.decompose()
-    return str(el)
 
 
 def _extract_rating_value(soup: BeautifulSoup) -> str:
@@ -181,6 +149,39 @@ def _extract_pyramid(soup: BeautifulSoup) -> dict:
             if note:
                 pyramid[level_key].append(note)
 
+    if any(pyramid.values()):
+        return pyramid
+
+    fallback_containers = []
+    for container in all_level_containers:
+        notes = []
+        image_areas = []
+        for link in container.select("a.pyramid-note-link"):
+            note = _parse_note_link(link)
+            if not note:
+                continue
+            notes.append(note)
+            image_areas.append(_note_image_area(note))
+
+        if notes:
+            average_area = sum(image_areas) / len(image_areas) if image_areas else 0
+            fallback_containers.append({"notes": notes, "average_area": average_area})
+
+    if not fallback_containers:
+        return pyramid
+
+    fallback_containers.sort(key=lambda item: item["average_area"], reverse=True)
+    if len(fallback_containers) == 1:
+        pyramid["top_notes"].extend(fallback_containers[0]["notes"])
+    elif len(fallback_containers) == 2:
+        pyramid["top_notes"].extend(fallback_containers[0]["notes"])
+        pyramid["base_notes"].extend(fallback_containers[1]["notes"])
+    else:
+        pyramid["top_notes"].extend(fallback_containers[0]["notes"])
+        pyramid["base_notes"].extend(fallback_containers[-1]["notes"])
+        for container in fallback_containers[1:-1]:
+            pyramid["middle_notes"].extend(container["notes"])
+
     return pyramid
 
 
@@ -191,6 +192,7 @@ def _parse_note_link(note_link) -> dict | None:
     img = note_link.select_one("img")
     img_src = img.get("src", "") if img else ""
     img_alt = img.get("alt", "") if img else ""
+    img_width, img_height = _parse_image_dimensions(img)
 
     label = note_link.select_one("span.pyramid-note-label")
     note_name = label.get_text(strip=True) if label else img_alt
@@ -207,8 +209,51 @@ def _parse_note_link(note_link) -> dict | None:
         "name": note_name,
         "note_id": note_id,
         "image_url": img_src,
+        "image_width": img_width,
+        "image_height": img_height,
         "opacity": round(opacity, 4),
     }
+
+
+def _parse_image_dimensions(img) -> tuple[float, float]:
+    if not img:
+        return 0, 0
+
+    width = _parse_numeric_dimension(img.get("width", ""))
+    height = _parse_numeric_dimension(img.get("height", ""))
+
+    style = img.get("style", "")
+    if not width:
+        width_match = re.search(r"width:\s*([\d.]+)px", style)
+        width = float(width_match.group(1)) if width_match else 0
+    if not height:
+        height_match = re.search(r"height:\s*([\d.]+)px", style)
+        height = float(height_match.group(1)) if height_match else 0
+
+    if not width or not height:
+        srcset_size = _largest_srcset_width(img.get("srcset", ""))
+        width = width or srcset_size
+        height = height or srcset_size
+
+    return width, height
+
+
+def _parse_numeric_dimension(value: str) -> float:
+    match = re.search(r"[\d.]+", str(value))
+    return float(match.group(0)) if match else 0
+
+
+def _largest_srcset_width(srcset: str) -> float:
+    widths = [float(width) for width in re.findall(r"\s(\d+(?:\.\d+)?)w", srcset)]
+    return max(widths) if widths else 0
+
+
+def _note_image_area(note: dict) -> float:
+    width = float(note.get("image_width") or 0)
+    height = float(note.get("image_height") or 0)
+    if width and height:
+        return width * height
+    return width or height
 
 
 def _extract_id(url: str) -> str:
