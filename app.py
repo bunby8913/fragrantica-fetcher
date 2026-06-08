@@ -7,6 +7,13 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 
+from auth import (
+    exchange_code_for_tokens,
+    keycloak_config,
+    refresh_access_token,
+    require_auth,
+    revoke_token,
+)
 from db import (
     DuplicatePerfumeError,
     add_perfume,
@@ -14,6 +21,7 @@ from db import (
     delete_from_wishlist,
     delete_perfume,
     get_all_perfumes,
+    get_or_create_user,
     get_wishlist,
     move_to_library,
     run_migrations,
@@ -49,6 +57,11 @@ def _is_valid_fragrantica_url(url: str) -> bool:
     )
 
 
+def _get_user_id() -> int:
+    keycloak_uuid = request.keycloak_user.get("sub", "")
+    return get_or_create_user(keycloak_uuid)
+
+
 @app.route("/")
 def index():
     return render_template("index.html", page="library")
@@ -59,19 +72,81 @@ def wishlist():
     return render_template("index.html", page="wishlist")
 
 
+@app.route("/login")
+def login():
+    return render_template("login.html")
+
+
+@app.route("/callback")
+def callback():
+    return render_template("callback.html")
+
+
+@app.get("/auth/config")
+def auth_config():
+    config = keycloak_config()
+    return jsonify(
+        {
+            "keycloakUrl": config["keycloak_url"],
+            "realm": config["realm"],
+            "clientId": config["client_id"],
+        }
+    )
+
+
+@app.post("/auth/token")
+def auth_token():
+    payload = request.get_json(silent=True) or {}
+    grant_type = str(payload.get("grant_type", ""))
+
+    if grant_type == "authorization_code":
+        code = str(payload.get("code", ""))
+        code_verifier = str(payload.get("code_verifier", ""))
+        redirect_uri = str(payload.get("redirect_uri", ""))
+        if not code or not code_verifier or not redirect_uri:
+            return jsonify({"error": "Missing code, code_verifier, or redirect_uri"}), 400
+        data, status = exchange_code_for_tokens(code, code_verifier, redirect_uri)
+    elif grant_type == "refresh_token":
+        refresh_token_str = str(payload.get("refresh_token", ""))
+        if not refresh_token_str:
+            return jsonify({"error": "Missing refresh_token"}), 400
+        data, status = refresh_access_token(refresh_token_str)
+    else:
+        return jsonify({"error": "Invalid grant_type"}), 400
+
+    if status >= 400:
+        error_msg = data.get("error_description") or data.get("error") or "Token request failed"
+        return jsonify({"error": error_msg}), status
+    return jsonify(data), status
+
+
+@app.post("/auth/logout")
+def auth_logout():
+    payload = request.get_json(silent=True) or {}
+    refresh_token_str = str(payload.get("refresh_token", ""))
+    if refresh_token_str:
+        revoke_token(refresh_token_str)
+    return jsonify({"success": True})
+
+
 @app.get("/get_all_perfume")
+@require_auth
 def get_all_perfume():
-    perfumes = [_json_ready(row) for row in get_all_perfumes()]
+    user_id = _get_user_id()
+    perfumes = [_json_ready(row) for row in get_all_perfumes(user_id)]
     return jsonify(perfumes)
 
 
 @app.get("/get_wishlist")
+@require_auth
 def get_wishlist_api():
-    wishlist_entries = [_json_ready(row) for row in get_wishlist()]
+    user_id = _get_user_id()
+    wishlist_entries = [_json_ready(row) for row in get_wishlist(user_id)]
     return jsonify(wishlist_entries)
 
 
 @app.post("/add_perfume")
+@require_auth
 def add_perfume_api():
     payload = request.get_json(silent=True) or {}
     url = str(payload.get("url", "")).strip()
@@ -89,11 +164,13 @@ def add_perfume_api():
         return jsonify({"error": "Could not extract perfume name from page"}), 422
 
     try:
+        user_id = _get_user_id()
         row = add_perfume(
             name=data.get("name", ""),
             brand=data.get("brand", ""),
             pyramid_data=json.dumps(data.get("pyramid", {})),
             original_address=url,
+            user_id=user_id,
         )
     except DuplicatePerfumeError:
         return jsonify({"error": "A perfume with the same name and brand already exists"}), 409
@@ -102,6 +179,7 @@ def add_perfume_api():
 
 
 @app.post("/add_to_wishlist")
+@require_auth
 def add_to_wishlist_api():
     payload = request.get_json(silent=True) or {}
     url = str(payload.get("url", "")).strip()
@@ -119,11 +197,13 @@ def add_to_wishlist_api():
         return jsonify({"error": "Could not extract perfume name from page"}), 422
 
     try:
+        user_id = _get_user_id()
         row = add_to_wishlist(
             name=data.get("name", ""),
             brand=data.get("brand", ""),
             pyramid_data=json.dumps(data.get("pyramid", {})),
             original_address=url,
+            user_id=user_id,
         )
     except DuplicatePerfumeError:
         return jsonify({"error": "A wishlist item with the same name and brand already exists"}), 409
@@ -132,6 +212,7 @@ def add_to_wishlist_api():
 
 
 @app.put("/perfume/<int:perfume_id>/rating")
+@require_auth
 def update_rating_api(perfume_id: int):
     payload = request.get_json(silent=True) or {}
     rating_value = payload.get("rating")
@@ -148,24 +229,28 @@ def update_rating_api(perfume_id: int):
     if rating not in {1, 2, 3, 4, 5}:
         return jsonify({"error": "Rating must be a whole number from 1 to 5"}), 400
 
-    row = update_rating(perfume_id, rating)
+    user_id = _get_user_id()
+    row = update_rating(perfume_id, rating, user_id)
     if not row:
         return jsonify({"error": "Perfume not found"}), 404
     return jsonify(_json_ready(row))
 
 
 @app.put("/perfume/<int:perfume_id>/note")
+@require_auth
 def update_note_api(perfume_id: int):
     payload = request.get_json(silent=True) or {}
     note = str(payload.get("note", ""))
 
-    row = update_note(perfume_id, note)
+    user_id = _get_user_id()
+    row = update_note(perfume_id, note, user_id)
     if not row:
         return jsonify({"error": "Perfume not found"}), 404
     return jsonify(_json_ready(row))
 
 
 @app.put("/perfume/<int:perfume_id>/size")
+@require_auth
 def update_size_api(perfume_id: int):
     payload = request.get_json(silent=True) or {}
     try:
@@ -176,23 +261,28 @@ def update_size_api(perfume_id: int):
     if size not in {0, 1, 2, 3}:
         return jsonify({"error": "Size must be 0, 1, 2, or 3"}), 400
 
-    row = update_size(perfume_id, size)
+    user_id = _get_user_id()
+    row = update_size(perfume_id, size, user_id)
     if not row:
         return jsonify({"error": "Perfume not found"}), 404
     return jsonify(_json_ready(row))
 
 
 @app.delete("/perfume/<int:perfume_id>")
+@require_auth
 def delete_perfume_api(perfume_id: int):
-    if not delete_perfume(perfume_id):
+    user_id = _get_user_id()
+    if not delete_perfume(perfume_id, user_id):
         return jsonify({"error": "Perfume not found"}), 404
     return jsonify({"success": True})
 
 
 @app.post("/wishlist/<int:wishlist_id>/move")
+@require_auth
 def move_wishlist_item_api(wishlist_id: int):
+    user_id = _get_user_id()
     try:
-        row = move_to_library(wishlist_id)
+        row = move_to_library(wishlist_id, user_id)
     except DuplicatePerfumeError:
         return jsonify({"error": "A perfume with the same name and brand already exists"}), 409
 
@@ -202,8 +292,10 @@ def move_wishlist_item_api(wishlist_id: int):
 
 
 @app.delete("/wishlist/<int:wishlist_id>")
+@require_auth
 def delete_wishlist_item_api(wishlist_id: int):
-    if not delete_from_wishlist(wishlist_id):
+    user_id = _get_user_id()
+    if not delete_from_wishlist(wishlist_id, user_id):
         return jsonify({"error": "Wishlist item not found"}), 404
     return jsonify({"success": True})
 

@@ -166,13 +166,34 @@ def run_migrations() -> None:
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    keycloak_uuid VARCHAR(36) NOT NULL UNIQUE
+                );
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE perfume
+                ADD COLUMN IF NOT EXISTS user_id INT;
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE wishlist
+                ADD COLUMN IF NOT EXISTS user_id INT;
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS wishlist (
                     id SERIAL PRIMARY KEY,
                     name VARCHAR NOT NULL,
                     brand VARCHAR NOT NULL,
                     pyramid_data TEXT,
                     creation_date DATE DEFAULT CURRENT_DATE,
-                    original_address VARCHAR
+                    original_address VARCHAR,
+                    user_id INT
                 );
                 """
             )
@@ -207,11 +228,30 @@ def run_migrations() -> None:
             )
 
 
+def get_or_create_user(keycloak_uuid: str) -> int:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM users WHERE keycloak_uuid = %s;",
+                (keycloak_uuid,),
+            )
+            row = cur.fetchone()
+            if row:
+                return row[0]
+
+            cur.execute(
+                "INSERT INTO users (keycloak_uuid) VALUES (%s) RETURNING id;",
+                (keycloak_uuid,),
+            )
+            return cur.fetchone()[0]
+
+
 def add_perfume(
     name: str,
     brand: str,
     pyramid_data: str,
     original_address: str,
+    user_id: int,
     description: str = "",
     size: int = 0,
 ) -> dict:
@@ -226,9 +266,10 @@ def add_perfume(
                         pyramid_data,
                         description,
                         original_address,
-                        size
+                        size,
+                        user_id
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     RETURNING
                         id,
                         name,
@@ -240,14 +281,14 @@ def add_perfume(
                         original_address,
                         size;
                     """,
-                    (name, brand, pyramid_data, description, original_address, size),
+                    (name, brand, pyramid_data, description, original_address, size, user_id),
                 )
                 return dict(cur.fetchone())
     except errors.UniqueViolation as exc:
         raise DuplicatePerfumeError from exc
 
 
-def get_all_perfumes() -> list[dict]:
+def get_all_perfumes(user_id: int) -> list[dict]:
     with get_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
@@ -263,20 +304,22 @@ def get_all_perfumes() -> list[dict]:
                     original_address,
                     size
                 FROM perfume
+                WHERE user_id = %s
                 ORDER BY creation_date DESC, id DESC;
-                """
+                """,
+                (user_id,),
             )
             return [dict(row) for row in cur.fetchall()]
 
 
-def update_rating(perfume_id: int, rating: int) -> dict | None:
+def update_rating(perfume_id: int, rating: int, user_id: int) -> dict | None:
     with get_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
                 UPDATE perfume
                 SET rating = %s
-                WHERE id = %s
+                WHERE id = %s AND user_id = %s
                 RETURNING
                     id,
                     name,
@@ -288,20 +331,20 @@ def update_rating(perfume_id: int, rating: int) -> dict | None:
                     original_address,
                     size;
                 """,
-                (rating, perfume_id),
+                (rating, perfume_id, user_id),
             )
             row = cur.fetchone()
             return dict(row) if row else None
 
 
-def update_note(perfume_id: int, note: str) -> dict | None:
+def update_note(perfume_id: int, note: str, user_id: int) -> dict | None:
     with get_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
                 UPDATE perfume
                 SET description = %s
-                WHERE id = %s
+                WHERE id = %s AND user_id = %s
                 RETURNING
                     id,
                     name,
@@ -313,20 +356,20 @@ def update_note(perfume_id: int, note: str) -> dict | None:
                     original_address,
                     size;
                 """,
-                (note, perfume_id),
+                (note, perfume_id, user_id),
             )
             row = cur.fetchone()
             return dict(row) if row else None
 
 
-def update_size(perfume_id: int, size: int) -> dict | None:
+def update_size(perfume_id: int, size: int, user_id: int) -> dict | None:
     with get_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
                 UPDATE perfume
                 SET size = %s
-                WHERE id = %s
+                WHERE id = %s AND user_id = %s
                 RETURNING
                     id,
                     name,
@@ -338,16 +381,19 @@ def update_size(perfume_id: int, size: int) -> dict | None:
                     original_address,
                     size;
                 """,
-                (size, perfume_id),
+                (size, perfume_id, user_id),
             )
             row = cur.fetchone()
             return dict(row) if row else None
 
 
-def delete_perfume(perfume_id: int) -> bool:
+def delete_perfume(perfume_id: int, user_id: int) -> bool:
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM perfume WHERE id = %s;", (perfume_id,))
+            cur.execute(
+                "DELETE FROM perfume WHERE id = %s AND user_id = %s;",
+                (perfume_id, user_id),
+            )
             return cur.rowcount > 0
 
 
@@ -356,6 +402,7 @@ def add_to_wishlist(
     brand: str,
     pyramid_data: str,
     original_address: str,
+    user_id: int,
 ) -> dict:
     try:
         with get_connection() as conn:
@@ -366,9 +413,10 @@ def add_to_wishlist(
                         name,
                         brand,
                         pyramid_data,
-                        original_address
+                        original_address,
+                        user_id
                     )
-                    VALUES (%s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s)
                     RETURNING
                         id,
                         name,
@@ -377,14 +425,14 @@ def add_to_wishlist(
                         creation_date,
                         original_address;
                     """,
-                    (name, brand, pyramid_data, original_address),
+                    (name, brand, pyramid_data, original_address, user_id),
                 )
                 return dict(cur.fetchone())
     except errors.UniqueViolation as exc:
         raise DuplicatePerfumeError from exc
 
 
-def get_wishlist() -> list[dict]:
+def get_wishlist(user_id: int) -> list[dict]:
     with get_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
@@ -397,13 +445,15 @@ def get_wishlist() -> list[dict]:
                     creation_date,
                     original_address
                 FROM wishlist
+                WHERE user_id = %s
                 ORDER BY creation_date DESC, id DESC;
-                """
+                """,
+                (user_id,),
             )
             return [dict(row) for row in cur.fetchall()]
 
 
-def move_to_library(wishlist_id: int) -> dict | None:
+def move_to_library(wishlist_id: int, user_id: int) -> dict | None:
     try:
         with get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -416,10 +466,10 @@ def move_to_library(wishlist_id: int) -> dict | None:
                         pyramid_data,
                         original_address
                     FROM wishlist
-                    WHERE id = %s
+                    WHERE id = %s AND user_id = %s
                     FOR UPDATE;
                     """,
-                    (wishlist_id,),
+                    (wishlist_id, user_id),
                 )
                 wishlist_row = cur.fetchone()
                 if not wishlist_row:
@@ -431,9 +481,10 @@ def move_to_library(wishlist_id: int) -> dict | None:
                         name,
                         brand,
                         pyramid_data,
-                        original_address
+                        original_address,
+                        user_id
                     )
-                    VALUES (%s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s)
                     RETURNING
                         id,
                         name,
@@ -450,6 +501,7 @@ def move_to_library(wishlist_id: int) -> dict | None:
                         wishlist_row["brand"],
                         wishlist_row["pyramid_data"],
                         wishlist_row["original_address"],
+                        user_id,
                     ),
                 )
                 perfume_row = cur.fetchone()
@@ -460,8 +512,11 @@ def move_to_library(wishlist_id: int) -> dict | None:
         raise DuplicatePerfumeError from exc
 
 
-def delete_from_wishlist(wishlist_id: int) -> bool:
+def delete_from_wishlist(wishlist_id: int, user_id: int) -> bool:
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM wishlist WHERE id = %s;", (wishlist_id,))
+            cur.execute(
+                "DELETE FROM wishlist WHERE id = %s AND user_id = %s;",
+                (wishlist_id, user_id),
+            )
             return cur.rowcount > 0

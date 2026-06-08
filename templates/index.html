@@ -18,6 +18,7 @@
         <nav class="page-nav" aria-label="Page navigation">
           <a class="{{ 'active' if page == 'library' else '' }}" href="/">Library</a>
           <a class="{{ 'active' if page == 'wishlist' else '' }}" href="/wishlist">Wishlist</a>
+          <a id="logout-link" href="/login">Logout</a>
         </nav>
       </section>
 
@@ -71,6 +72,7 @@
     </section>
 
     <script>const PAGE = "{{ page }}";</script>
+    <script src="{{ url_for('static', filename='auth.js') }}"></script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
 </html>

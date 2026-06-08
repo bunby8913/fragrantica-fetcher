@@ -4,6 +4,7 @@ const form = document.querySelector("#add-perfume-form");
 const urlInput = document.querySelector("#perfume-url");
 const searchInput = document.querySelector("#table-search");
 const sortableHeaders = document.querySelectorAll("th.sortable");
+const logoutLink = document.querySelector("#logout-link");
 const currentPage = typeof PAGE === "string" ? PAGE : document.body.dataset.page || "library";
 const isWishlistPage = currentPage === "wishlist";
 
@@ -201,7 +202,7 @@ async function updateNote(perfume, textarea) {
 
   textarea.disabled = true;
   try {
-    const response = await fetch(`/perfume/${perfume.id}/note`, {
+    const response = await window.Auth.authFetch(`/perfume/${perfume.id}/note`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ note }),
@@ -226,7 +227,7 @@ async function updateSize(perfume, select) {
   select.disabled = true;
 
   try {
-    const response = await fetch(`/perfume/${perfume.id}/size`, {
+    const response = await window.Auth.authFetch(`/perfume/${perfume.id}/size`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ size }),
@@ -254,7 +255,7 @@ async function updateRating(perfume, container, rating) {
   updateStarDisplay(container, nextRating);
 
   try {
-    const response = await fetch(`/perfume/${perfume.id}/rating`, {
+    const response = await window.Auth.authFetch(`/perfume/${perfume.id}/rating`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rating: nextRating }),
@@ -281,7 +282,7 @@ async function deletePerfume(perfume, button) {
 
   button.disabled = true;
   try {
-    const response = await fetch(api.delete(perfume.id), { method: "DELETE" });
+    const response = await window.Auth.authFetch(api.delete(perfume.id), { method: "DELETE" });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `Could not delete ${itemType}`);
 
@@ -298,7 +299,7 @@ async function deletePerfume(perfume, button) {
 async function moveToLibrary(perfume, button) {
   button.disabled = true;
   try {
-    const response = await fetch(api.move(perfume.id), { method: "POST" });
+    const response = await window.Auth.authFetch(api.move(perfume.id), { method: "POST" });
     const moved = await response.json();
     if (!response.ok) throw new Error(moved.error || "Could not move wishlist item");
 
@@ -428,7 +429,7 @@ function renderPerfumes() {
 
 async function loadPerfumes() {
   try {
-    const response = await fetch(api.getAll);
+    const response = await window.Auth.authFetch(api.getAll);
     const perfumes = await response.json();
     if (!response.ok) throw new Error(perfumes.error || "Could not load perfumes");
 
@@ -478,7 +479,7 @@ form.addEventListener("submit", async (event) => {
       setStatus(`Fetching perfume data ${index + 1}/${urls.length}. This can take a moment...`);
 
       try {
-        const response = await fetch(api.add, {
+        const response = await window.Auth.authFetch(api.add, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url }),
@@ -511,4 +512,15 @@ form.addEventListener("submit", async (event) => {
 
 window.addEventListener("resize", autoResizeAllTextareas);
 
-loadPerfumes();
+if (logoutLink) {
+  logoutLink.addEventListener("click", (event) => {
+    event.preventDefault();
+    window.Auth.logout();
+  });
+}
+
+(async function initialize() {
+  if (await window.Auth.requireAuth()) {
+    loadPerfumes();
+  }
+})();

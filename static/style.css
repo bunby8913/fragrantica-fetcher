@@ -465,6 +465,92 @@ td {
   opacity: 0.68;
 }
 
+.auth-shell {
+  display: grid;
+  width: min(100% - 32px, 460px);
+  min-height: 100vh;
+  margin: 0 auto;
+  place-items: center;
+}
+
+.auth-card {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 28px;
+  padding: 32px;
+  background: var(--panel);
+  box-shadow: 16px 16px 40px var(--shadow-dark), -16px -16px 40px var(--shadow-light);
+  backdrop-filter: blur(18px);
+}
+
+.auth-card h1 {
+  margin-bottom: 10px;
+  font-size: 2rem;
+  letter-spacing: -0.05em;
+}
+
+.auth-button {
+  width: 100%;
+  min-height: 52px;
+  margin-top: 24px;
+  border: 0;
+  border-radius: 18px;
+  background: linear-gradient(135deg, var(--accent), #9f75ff);
+  box-shadow: 9px 9px 20px rgba(95, 102, 121, 0.24), -9px -9px 20px rgba(255, 255, 255, 0.82);
+  color: white;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 850;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.auth-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 12px 12px 24px rgba(95, 102, 121, 0.26), -12px -12px 24px rgba(255, 255, 255, 0.9);
+}
+
+.auth-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.auth-button-link {
+  display: inline-block;
+  width: 100%;
+  margin-top: 24px;
+  padding: 14px 0;
+  border-radius: 18px;
+  background: linear-gradient(135deg, var(--accent), #9f75ff);
+  box-shadow: 9px 9px 20px rgba(95, 102, 121, 0.24), -9px -9px 20px rgba(255, 255, 255, 0.82);
+  color: white;
+  text-align: center;
+  text-decoration: none;
+  font: inherit;
+  font-weight: 850;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.auth-button-link:hover {
+  transform: translateY(-2px);
+  box-shadow: 12px 12px 24px rgba(95, 102, 121, 0.26), -12px -12px 24px rgba(255, 255, 255, 0.9);
+}
+
+.auth-text-link {
+  display: inline-block;
+  margin-top: 16px;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  text-align: center;
+  width: 100%;
+  text-decoration: none;
+  opacity: 0.7;
+  transition: opacity 160ms ease;
+}
+
+.auth-text-link:hover {
+  opacity: 1;
+}
+
 @media (max-width: 760px) {
   .shell {
     width: min(100% - 20px, 1380px);
