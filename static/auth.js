@@ -7,21 +7,11 @@
 
   let configPromise = null;
 
-  function base64UrlEncode(bytes) {
-    const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
-    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-  }
-
   function randomString(length = 64) {
     const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
     const values = new Uint8Array(length);
     crypto.getRandomValues(values);
     return Array.from(values, (value) => charset[value % charset.length]).join("");
-  }
-
-  async function sha256(value) {
-    const data = new TextEncoder().encode(value);
-    return new Uint8Array(await crypto.subtle.digest("SHA-256", data));
   }
 
   async function getConfig() {
@@ -43,7 +33,7 @@
       response_type: "code",
       scope: "openid profile email",
       code_challenge: codeChallenge,
-      code_challenge_method: "S256",
+      code_challenge_method: "plain",
     });
 
     return `${config.keycloakUrl}/realms/${encodeURIComponent(config.realm)}/protocol/openid-connect/auth?${params}`;
@@ -123,7 +113,7 @@
   async function startLogin(returnTo = "/") {
     const config = await getConfig();
     const verifier = randomString();
-    const challenge = base64UrlEncode(await sha256(verifier));
+    const challenge = verifier;
     sessionStorage.setItem(CODE_VERIFIER_KEY, verifier);
     sessionStorage.setItem(RETURN_TO_KEY, returnTo || "/");
     window.location.href = loginUrl(config, challenge);
