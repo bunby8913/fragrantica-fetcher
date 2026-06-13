@@ -3,6 +3,8 @@ const statusEl = document.querySelector("#status");
 const form = document.querySelector("#add-perfume-form");
 const urlInput = document.querySelector("#perfume-url");
 const searchInput = document.querySelector("#table-search");
+const tableToolbar = document.querySelector(".table-toolbar");
+const searchField = document.querySelector(".search-field");
 const sortableHeaders = document.querySelectorAll("th.sortable");
 const logoutLink = document.querySelector("#logout-link");
 const currentPage = typeof PAGE === "string" ? PAGE : document.body.dataset.page || "library";
@@ -13,12 +15,14 @@ const api = isWishlistPage
     getAll: "/get_wishlist",
     add: "/add_to_wishlist",
     delete: (id) => `/wishlist/${id}`,
+    details: (id) => `/wishlist/${id}/details`,
     move: (id) => `/wishlist/${id}/move`,
   }
   : {
     getAll: "/get_all_perfume",
     add: "/add_perfume",
     delete: (id) => `/perfume/${id}`,
+    details: (id) => `/perfume/${id}/details`,
   };
 
 const sizeLabels = {
@@ -31,6 +35,8 @@ const sizeLabels = {
 let allPerfumes = [];
 let currentSort = { column: "creation_date", direction: "desc" };
 let currentSearch = "";
+let editingPerfumeId = null;
+let editingBackup = null;
 
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
@@ -66,7 +72,7 @@ function renderPyramidHTML(value) {
   const pyramid = parsePyramid(value);
   const labels = [
     ["top_notes", "Top"],
-    ["middle_notes", "Middle"],
+    ["middle_notes", "Mid"],
     ["base_notes", "Base"],
   ];
 
@@ -87,6 +93,45 @@ function renderPyramidHTML(value) {
     .join("");
 
   return levels || `<span class="muted-text">No notes</span>`;
+}
+
+function pyramidLevelText(value, key) {
+  const pyramid = parsePyramid(value);
+  return (pyramid[key] || [])
+    .map((note) => note.name)
+    .filter(Boolean)
+    .join(", ");
+}
+
+function renderPyramidEditHTML(value) {
+  return [
+    ["top_notes", "Top"],
+    ["middle_notes", "Mid"],
+    ["base_notes", "Base"],
+  ]
+    .map(([key, label]) => `
+      <label class="pyramid-edit-row">
+        <span class="level-tag">${escapeHtml(label)}</span>
+        <input class="edit-pyramid-input" data-key="${escapeHtml(key)}" type="text" value="${escapeHtml(pyramidLevelText(value, key))}" placeholder="${escapeHtml(label)} notes">
+      </label>
+    `)
+    .join("");
+}
+
+function csvToNotes(value) {
+  return String(value || "")
+    .split(",")
+    .map((note) => note.trim())
+    .filter(Boolean)
+    .map((name) => ({ name }));
+}
+
+function editedPyramidFromRow(row) {
+  return ["top_notes", "middle_notes", "base_notes"].reduce((pyramid, key) => {
+    const input = row.querySelector(`.edit-pyramid-input[data-key="${key}"]`);
+    pyramid[key] = csvToNotes(input ? input.value : "");
+    return pyramid;
+  }, {});
 }
 
 function pyramidSearchText(value) {
@@ -171,13 +216,96 @@ function updateSortIndicators() {
   sortableHeaders.forEach((header) => {
     const indicator = header.querySelector(".sort-indicator");
     const isActive = header.dataset.sort === currentSort.column;
-    indicator.textContent = isActive ? (currentSort.direction === "asc" ? "▲" : "▼") : "";
+    indicator.innerHTML = `
+      <span class="sort-arrow ${isActive && currentSort.direction === "asc" ? "active" : ""}">▲</span>
+      <span class="sort-arrow ${isActive && currentSort.direction === "desc" ? "active" : ""}">▼</span>
+    `;
     header.setAttribute("aria-sort", isActive ? (currentSort.direction === "asc" ? "ascending" : "descending") : "none");
   });
 }
 
 function updatePerfumeInState(updated) {
   allPerfumes = allPerfumes.map((perfume) => (perfume.id === updated.id ? updated : perfume));
+}
+
+function clearEditingState() {
+  editingPerfumeId = null;
+  editingBackup = null;
+  document.removeEventListener("click", handleOutsideEditClick);
+}
+
+function cancelEditing() {
+  if (!editingPerfumeId) return;
+  const backup = editingBackup;
+  if (backup) {
+    allPerfumes = allPerfumes.map((perfume) => (perfume.id === backup.id ? { ...perfume, ...backup } : perfume));
+  }
+  clearEditingState();
+  renderPerfumes();
+}
+
+function handleOutsideEditClick(event) {
+  if (!editingPerfumeId) return;
+  const editingRow = tableBody.querySelector(`tr[data-id="${editingPerfumeId}"]`);
+  if (editingRow && editingRow.contains(event.target)) return;
+  cancelEditing();
+}
+
+function startEditing(perfume) {
+  if (editingPerfumeId && editingPerfumeId !== perfume.id) {
+    clearEditingState();
+  }
+
+  editingPerfumeId = perfume.id;
+  editingBackup = {
+    id: perfume.id,
+    name: perfume.name,
+    brand: perfume.brand,
+    pyramid_data: perfume.pyramid_data,
+  };
+  renderPerfumes();
+  document.addEventListener("click", handleOutsideEditClick);
+}
+
+async function saveDetails(perfume, row, button) {
+  const nameInput = row.querySelector(".edit-name-input");
+  const brandInput = row.querySelector(".edit-brand-input");
+  const name = nameInput.value.trim();
+  const brand = brandInput.value.trim();
+
+  if (!name || !brand) {
+    setStatus("Name and brand are required.", true);
+    return;
+  }
+
+  row.querySelectorAll("input, button").forEach((control) => {
+    control.disabled = true;
+  });
+
+  try {
+    const response = await window.Auth.authFetch(api.details(perfume.id), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        brand,
+        pyramid_data: editedPyramidFromRow(row),
+      }),
+    });
+    const updated = await response.json();
+    if (!response.ok) throw new Error(updated.error || "Could not update perfume details");
+
+    updatePerfumeInState(updated);
+    clearEditingState();
+    renderPerfumes();
+    setStatus(`Updated ${updated.name} by ${updated.brand}.`);
+  } catch (error) {
+    row.querySelectorAll("input, button").forEach((control) => {
+      control.disabled = false;
+    });
+    button.disabled = false;
+    setStatus(error.message, true);
+  }
 }
 
 function normalizedRating(value) {
@@ -316,21 +444,46 @@ async function moveToLibrary(perfume, button) {
 function renderPerfumeRow(perfume) {
   const row = document.createElement("tr");
   row.dataset.id = perfume.id;
+  const isEditing = editingPerfumeId === perfume.id;
+  const nameCell = isEditing
+    ? `<td class="name-cell"><input class="edit-text-input edit-name-input" type="text" value="${escapeHtml(perfume.name)}" aria-label="Perfume name"></td>`
+    : `<td class="name-cell">${escapeHtml(perfume.name)}</td>`;
+  const brandCell = isEditing
+    ? `<td class="brand-cell"><input class="edit-text-input edit-brand-input" type="text" value="${escapeHtml(perfume.brand)}" aria-label="Brand"></td>`
+    : `<td class="brand-cell">${escapeHtml(perfume.brand)}</td>`;
+  const pyramidCell = isEditing
+    ? `<td class="pyramid-cell"><div class="pyramid-edit-inputs">${renderPyramidEditHTML(perfume.pyramid_data)}</div></td>`
+    : `<td class="pyramid-cell"><div class="pyramid-levels">${renderPyramidHTML(perfume.pyramid_data)}</div></td>`;
+  const editButton = `<button class="edit-button ${isEditing ? "saving-state" : ""}" type="button">${isEditing ? "Save" : "Edit"}</button>`;
 
   if (isWishlistPage) {
     row.innerHTML = `
-      <td class="name-cell">${escapeHtml(perfume.name)}</td>
-      <td class="brand-cell">${escapeHtml(perfume.brand)}</td>
-      <td class="pyramid-cell"><div class="pyramid-levels">${renderPyramidHTML(perfume.pyramid_data)}</div></td>
-      <td class="creation-cell">${escapeHtml(perfume.creation_date)}</td>
-      <td class="url-cell"><a href="${escapeHtml(perfume.original_address)}" target="_blank" rel="noreferrer">Open</a></td>
+      ${nameCell}
+      ${brandCell}
+      ${pyramidCell}
       <td>
         <div class="action-cell">
-          <button class="move-button" type="button">Move to Library</button>
-          <button class="delete-button" type="button">Delete</button>
+          ${editButton}
+          ${isEditing ? "" : `
+            <button class="move-button" type="button">Move to Library</button>
+            <a class="action-link" href="${escapeHtml(perfume.original_address)}" target="_blank" rel="noreferrer" aria-label="Open ${escapeHtml(perfume.name)} on Fragrantica">Open</a>
+            <button class="delete-button" type="button">Delete</button>
+          `}
         </div>
       </td>
     `;
+
+    const editButtonEl = row.querySelector(".edit-button");
+    editButtonEl.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (isEditing) {
+        saveDetails(perfume, row, editButtonEl);
+      } else {
+        startEditing(perfume);
+      }
+    });
+
+    if (isEditing) return row;
 
     const moveButton = row.querySelector(".move-button");
     moveButton.addEventListener("click", () => moveToLibrary(perfume, moveButton));
@@ -346,18 +499,18 @@ function renderPerfumeRow(perfume) {
   const rating = normalizedRating(perfume.rating);
 
   row.innerHTML = `
-    <td class="name-cell">${escapeHtml(perfume.name)}</td>
-    <td class="brand-cell">${escapeHtml(perfume.brand)}</td>
-    <td class="pyramid-cell"><div class="pyramid-levels">${renderPyramidHTML(perfume.pyramid_data)}</div></td>
+    ${nameCell}
+    ${brandCell}
     <td class="rating-cell">
       <div
-        class="rating-stars"
+        class="rating-stars ${isEditing ? "disabled" : ""}"
         role="slider"
-        tabindex="0"
+        tabindex="${isEditing ? "-1" : "0"}"
         aria-valuemin="1"
         aria-valuemax="5"
         aria-valuenow="${rating}"
         aria-label="Rating ${rating} out of 5"
+        aria-disabled="${isEditing ? "true" : "false"}"
         data-rating="${rating}"
         data-saved-rating="${rating}"
       >
@@ -366,36 +519,53 @@ function renderPerfumeRow(perfume) {
       .join("")}
       </div>
     </td>
+    ${pyramidCell}
     <td class="note-cell">
-      <select class="note-size-select" aria-label="Size for ${escapeHtml(perfume.name)}">
+      <select class="note-size-select" aria-label="Size for ${escapeHtml(perfume.name)}" ${isEditing ? "disabled" : ""}>
         ${Object.entries(sizeLabels)
       .map(([value, label]) => `<option value="${value}" ${Number(value) === size ? "selected" : ""}>${escapeHtml(label)}</option>`)
       .join("")}
       </select>
-      <textarea class="note-input" rows="1" aria-label="Note for ${escapeHtml(perfume.name)}">${escapeHtml(note)}</textarea>
+      <textarea class="note-input" rows="1" aria-label="Note for ${escapeHtml(perfume.name)}" ${isEditing ? "disabled" : ""}>${escapeHtml(note)}</textarea>
     </td>
-    <td class="creation-cell">${escapeHtml(perfume.creation_date)}</td>
-    <td class="url-cell"><a href="${escapeHtml(perfume.original_address)}" target="_blank" rel="noreferrer">Open</a></td>
-    <td><button class="delete-button" type="button">Delete</button></td>
+    <td>
+      <div class="action-cell">
+        ${editButton}
+        ${isEditing ? "" : `
+          <a class="action-link" href="${escapeHtml(perfume.original_address)}" target="_blank" rel="noreferrer" aria-label="Open ${escapeHtml(perfume.name)} on Fragrantica">Open</a>
+          <button class="delete-button" type="button">Delete</button>
+        `}
+      </div>
+    </td>
   `;
+
+  const editButtonEl = row.querySelector(".edit-button");
+  editButtonEl.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (isEditing) {
+      saveDetails(perfume, row, editButtonEl);
+    } else {
+      startEditing(perfume);
+    }
+  });
 
   const ratingStars = row.querySelector(".rating-stars");
   ratingStars.addEventListener("click", (event) => {
     const star = event.target.closest(".rating-star");
-    if (!star || ratingStars.classList.contains("saving")) return;
+    if (!star || ratingStars.classList.contains("saving") || ratingStars.classList.contains("disabled")) return;
     updateRating(perfume, ratingStars, Number(star.dataset.value));
   });
   ratingStars.addEventListener("mouseover", (event) => {
     const star = event.target.closest(".rating-star");
-    if (!star || ratingStars.classList.contains("saving")) return;
+    if (!star || ratingStars.classList.contains("saving") || ratingStars.classList.contains("disabled")) return;
     updateStarDisplay(ratingStars, Number(star.dataset.value));
   });
   ratingStars.addEventListener("mouseleave", () => {
-    if (ratingStars.classList.contains("saving")) return;
+    if (ratingStars.classList.contains("saving") || ratingStars.classList.contains("disabled")) return;
     updateStarDisplay(ratingStars, ratingStars.dataset.savedRating);
   });
   ratingStars.addEventListener("keydown", (event) => {
-    if (ratingStars.classList.contains("saving")) return;
+    if (ratingStars.classList.contains("saving") || ratingStars.classList.contains("disabled")) return;
     if (!["ArrowLeft", "ArrowDown", "ArrowRight", "ArrowUp"].includes(event.key)) return;
 
     event.preventDefault();
@@ -413,6 +583,8 @@ function renderPerfumeRow(perfume) {
   const sizeSelect = row.querySelector(".note-size-select");
   sizeSelect.addEventListener("change", () => updateSize(perfume, sizeSelect));
 
+  if (isEditing) return row;
+
   const deleteButton = row.querySelector(".delete-button");
   deleteButton.addEventListener("click", () => deletePerfume(perfume, deleteButton));
 
@@ -424,6 +596,9 @@ function renderPerfumes() {
   const perfumes = sortedPerfumes();
   perfumes.forEach((perfume) => tableBody.appendChild(renderPerfumeRow(perfume)));
   updateSortIndicators();
+  if (editingPerfumeId) {
+    requestAnimationFrame(() => tableBody.querySelector(`tr[data-id="${editingPerfumeId}"] .edit-name-input`)?.focus());
+  }
   requestAnimationFrame(autoResizeAllTextareas);
 }
 
@@ -444,6 +619,12 @@ async function loadPerfumes() {
 
 searchInput.addEventListener("input", () => {
   currentSearch = searchInput.value;
+  renderPerfumes();
+});
+
+tableToolbar.addEventListener("click", (event) => {
+  if (searchField.contains(event.target)) return;
+  currentSort = { column: "creation_date", direction: "desc" };
   renderPerfumes();
 });
 

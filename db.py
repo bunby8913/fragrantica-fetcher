@@ -387,6 +387,39 @@ def update_size(perfume_id: int, size: int, user_id: int) -> dict | None:
             return dict(row) if row else None
 
 
+def update_perfume_details(
+    perfume_id: int,
+    name: str,
+    brand: str,
+    pyramid_data: str,
+    user_id: int,
+) -> dict | None:
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE perfume
+                SET name = %s,
+                    brand = %s,
+                    pyramid_data = %s
+                WHERE id = %s AND user_id = %s
+                RETURNING
+                    id,
+                    name,
+                    brand,
+                    pyramid_data,
+                    rating,
+                    description,
+                    creation_date,
+                    original_address,
+                    size;
+                """,
+                (name, brand, pyramid_data, perfume_id, user_id),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
 def delete_perfume(perfume_id: int, user_id: int) -> bool:
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -451,6 +484,36 @@ def get_wishlist(user_id: int) -> list[dict]:
                 (user_id,),
             )
             return [dict(row) for row in cur.fetchall()]
+
+
+def update_wishlist_details(
+    wishlist_id: int,
+    name: str,
+    brand: str,
+    pyramid_data: str,
+    user_id: int,
+) -> dict | None:
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE wishlist
+                SET name = %s,
+                    brand = %s,
+                    pyramid_data = %s
+                WHERE id = %s AND user_id = %s
+                RETURNING
+                    id,
+                    name,
+                    brand,
+                    pyramid_data,
+                    creation_date,
+                    original_address;
+                """,
+                (name, brand, pyramid_data, wishlist_id, user_id),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
 
 
 def move_to_library(wishlist_id: int, user_id: int) -> dict | None:

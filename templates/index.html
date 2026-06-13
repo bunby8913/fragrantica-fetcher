@@ -15,21 +15,24 @@
         <div>
           <p class="eyebrow">{{ 'Wishlist' if page == 'wishlist' else 'Perfume Library' }}</p>
         </div>
-        <nav class="page-nav" aria-label="Page navigation">
-          <a class="{{ 'active' if page == 'library' else '' }}" href="/">Library</a>
-          <a class="{{ 'active' if page == 'wishlist' else '' }}" href="/wishlist">Wishlist</a>
+        <div class="nav-group">
+          <nav class="page-nav" aria-label="Page navigation">
+            <a class="{{ 'active' if page == 'library' else '' }}" href="/">Library</a>
+            <a class="{{ 'active' if page == 'wishlist' else '' }}" href="/wishlist">Wishlist</a>
+          </nav>
           <a id="logout-link" href="/login">Logout</a>
-        </nav>
+        </div>
       </section>
 
       <section class="card" aria-label="Perfume database table">
         <div class="table-toolbar">
           <div>
-            <h2>{{ 'Wishlist' if page == 'wishlist' else 'Saved Perfumes' }}</h2>
+            <h2>{{ 'Wishlist' if page == 'wishlist' else 'My Perfume Collection' }}</h2>
             <p id="status" class="status">Loading database...</p>
           </div>
           <label class="search-field">
-            <span>Search</span>
+            <span class="visually-hidden">Search</span>
+            <img class="search-icon" src="{{ url_for('assets', filename='Icons/search.svg') }}" alt="" aria-hidden="true">
             <input id="table-search" type="search" placeholder="Search by name, brand, or notes..." autocomplete="off">
           </label>
         </div>
@@ -40,13 +43,13 @@
               <tr>
                 <th class="sortable" data-sort="name" scope="col">Name <span class="sort-indicator"></span></th>
                 <th class="sortable" data-sort="brand" scope="col">Brand <span class="sort-indicator"></span></th>
-                <th>Pyramid</th>
                 {% if page == 'library' %}
                 <th class="sortable" data-sort="rating" scope="col">Rating <span class="sort-indicator"></span></th>
-                <th>Note</th>
                 {% endif %}
-                <th class="sortable" data-sort="creation_date" scope="col">Created <span class="sort-indicator"></span></th>
-                <th>URL</th>
+                <th>Pyramid</th>
+                {% if page == 'library' %}
+                <th>Notes</th>
+                {% endif %}
                 <th>Actions</th>
               </tr>
             </thead>

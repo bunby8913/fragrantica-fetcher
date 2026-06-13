@@ -5,7 +5,7 @@ from decimal import Decimal
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from auth import (
     exchange_code_for_tokens,
@@ -25,9 +25,11 @@ from db import (
     get_wishlist,
     move_to_library,
     run_migrations,
+    update_perfume_details,
     update_rating,
     update_note,
     update_size,
+    update_wishlist_details,
 )
 from scraper import extract_perfume_data, fetch_page
 
@@ -80,6 +82,11 @@ def login():
 @app.route("/callback")
 def callback():
     return render_template("callback.html")
+
+
+@app.get("/assets/<path:filename>")
+def assets(filename: str):
+    return send_from_directory(os.path.join(app.root_path, "assets"), filename)
 
 
 @app.get("/auth/config")
@@ -268,6 +275,26 @@ def update_size_api(perfume_id: int):
     return jsonify(_json_ready(row))
 
 
+@app.put("/perfume/<int:perfume_id>/details")
+@require_auth
+def update_perfume_details_api(perfume_id: int):
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name", "")).strip()
+    brand = str(payload.get("brand", "")).strip()
+    pyramid_data = payload.get("pyramid_data", {})
+
+    if not name or not brand:
+        return jsonify({"error": "Name and brand are required"}), 400
+    if not isinstance(pyramid_data, str):
+        pyramid_data = json.dumps(pyramid_data)
+
+    user_id = _get_user_id()
+    row = update_perfume_details(perfume_id, name, brand, pyramid_data, user_id)
+    if not row:
+        return jsonify({"error": "Perfume not found"}), 404
+    return jsonify(_json_ready(row))
+
+
 @app.delete("/perfume/<int:perfume_id>")
 @require_auth
 def delete_perfume_api(perfume_id: int):
@@ -286,6 +313,26 @@ def move_wishlist_item_api(wishlist_id: int):
     except DuplicatePerfumeError:
         return jsonify({"error": "A perfume with the same name and brand already exists"}), 409
 
+    if not row:
+        return jsonify({"error": "Wishlist item not found"}), 404
+    return jsonify(_json_ready(row))
+
+
+@app.put("/wishlist/<int:wishlist_id>/details")
+@require_auth
+def update_wishlist_details_api(wishlist_id: int):
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name", "")).strip()
+    brand = str(payload.get("brand", "")).strip()
+    pyramid_data = payload.get("pyramid_data", {})
+
+    if not name or not brand:
+        return jsonify({"error": "Name and brand are required"}), 400
+    if not isinstance(pyramid_data, str):
+        pyramid_data = json.dumps(pyramid_data)
+
+    user_id = _get_user_id()
+    row = update_wishlist_details(wishlist_id, name, brand, pyramid_data, user_id)
     if not row:
         return jsonify({"error": "Wishlist item not found"}), 404
     return jsonify(_json_ready(row))
