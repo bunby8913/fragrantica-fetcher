@@ -226,15 +226,15 @@ def update_rating_api(perfume_id: int):
     if isinstance(rating_value, bool) or (
         isinstance(rating_value, float) and not rating_value.is_integer()
     ):
-        return jsonify({"error": "Rating must be a whole number from 1 to 5"}), 400
+        return jsonify({"error": "Rating must be a whole number from 0 to 5"}), 400
 
     try:
         rating = int(rating_value)
     except (TypeError, ValueError):
-        return jsonify({"error": "Rating must be a whole number from 1 to 5"}), 400
+        return jsonify({"error": "Rating must be a whole number from 0 to 5"}), 400
 
-    if rating not in {1, 2, 3, 4, 5}:
-        return jsonify({"error": "Rating must be a whole number from 1 to 5"}), 400
+    if rating not in {0, 1, 2, 3, 4, 5}:
+        return jsonify({"error": "Rating must be a whole number from 0 to 5"}), 400
 
     user_id = _get_user_id()
     row = update_rating(perfume_id, rating, user_id)

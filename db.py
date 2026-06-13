@@ -40,7 +40,7 @@ def run_migrations() -> None:
                     name VARCHAR NOT NULL,
                     brand VARCHAR NOT NULL,
                     pyramid_data TEXT,
-                    rating INT DEFAULT 3,
+                    rating INT DEFAULT 0,
                     description TEXT,
                     creation_date DATE DEFAULT CURRENT_DATE,
                     original_address VARCHAR
@@ -56,21 +56,21 @@ def run_migrations() -> None:
             cur.execute(
                 """
                 ALTER TABLE perfume
-                ADD COLUMN IF NOT EXISTS rating INT DEFAULT 3;
+                ADD COLUMN IF NOT EXISTS rating INT DEFAULT 0;
                 """
             )
             cur.execute(
                 """
                 ALTER TABLE perfume
-                ALTER COLUMN rating TYPE INT USING GREATEST(1, LEAST(5, COALESCE(rating, 3))),
-                ALTER COLUMN rating SET DEFAULT 3;
+                ALTER COLUMN rating TYPE INT USING GREATEST(0, LEAST(5, COALESCE(rating, 0))),
+                ALTER COLUMN rating SET DEFAULT 0;
                 """
             )
             cur.execute(
                 """
                 UPDATE perfume
-                SET rating = 3
-                WHERE rating IS NULL OR rating < 1 OR rating > 5;
+                SET rating = 0
+                WHERE rating IS NULL OR rating < 0 OR rating > 5;
                 """
             )
             cur.execute(
@@ -100,7 +100,7 @@ def run_migrations() -> None:
                     END LOOP;
 
                     ALTER TABLE perfume
-                    ADD CONSTRAINT perfume_rating_check CHECK (rating >= 1 AND rating <= 5);
+                    ADD CONSTRAINT perfume_rating_check CHECK (rating >= 0 AND rating <= 5);
                 END $$;
                 """
             )

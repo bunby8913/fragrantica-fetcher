@@ -115,9 +115,10 @@ p {
 
 .card {
   overflow: hidden;
-  border: 0;
-  border-radius: 22px;
-  box-shadow: 0 22px 60px rgba(42, 34, 93, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 28px;
+  background: var(--panel);
+  box-shadow: 16px 16px 40px var(--shadow-dark), -16px -16px 40px var(--shadow-light);
 }
 
 .table-toolbar {
@@ -199,8 +200,9 @@ p {
 
 table {
   width: 100%;
-  min-width: 1180px;
+  min-width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 th,
@@ -211,7 +213,14 @@ td {
   vertical-align: top;
 }
 
+th:last-child,
+td:last-child {
+  padding-right: 12px;
+  padding-left: 12px;
+}
+
 th {
+  position: relative;
   padding-top: 14px;
   padding-bottom: 14px;
   color: #3f4557;
@@ -229,6 +238,39 @@ th.sortable {
 
 th.sortable:hover {
   color: var(--accent);
+}
+
+.column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  z-index: 2;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+}
+
+.column-resize-handle::after {
+  position: absolute;
+  top: 20%;
+  right: 3px;
+  width: 1px;
+  height: 60%;
+  background: rgba(42, 48, 68, 0.18);
+  content: "";
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.column-resize-handle:hover::after,
+.resizing-column .column-resize-handle::after {
+  opacity: 1;
+}
+
+.resizing-column {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .sort-indicator {
@@ -256,44 +298,39 @@ tbody tr {
   transition: background 180ms ease;
 }
 
-tbody tr:hover {
-  background: rgba(247, 248, 252, 0.6);
-}
 
-tbody tr:hover td {
-  background: rgba(255, 255, 255, 0.84);
-}
 
 td {
-  background: rgba(255, 255, 255, 0.74);
   color: #242838;
   font-size: 0.94rem;
   line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 
 .name-cell {
-  min-width: 220px;
+  min-width: 140px;
   font-weight: 850;
   letter-spacing: -0.03em;
 }
 
 .brand-cell {
-  max-width: 160px;
+  min-width: 120px;
 }
 
 .pyramid-cell {
-  min-width: 360px;
+  min-width: 280px;
   max-width: 420px;
 }
 
 .note-cell {
   color: var(--muted);
-  min-width: 360px;
+  min-width: 220px;
 }
 
 .note-size-select {
   appearance: none;
   width: 100%;
+  min-width: 180px;
   min-height: 42px;
   margin-bottom: 10px;
   border: 1px solid rgba(42, 48, 68, 0.1);
@@ -359,6 +396,18 @@ td {
   outline: none;
 }
 
+.edit-name-input {
+  min-width: 100px;
+}
+
+.edit-brand-input {
+  min-width: 80px;
+}
+
+.edit-pyramid-input {
+  min-width: 180px;
+}
+
 .edit-text-input:focus,
 .edit-pyramid-input:focus {
   border-color: rgba(118, 87, 255, 0.32);
@@ -372,7 +421,7 @@ td {
 
 .pyramid-edit-row {
   display: grid;
-  grid-template-columns: 42px minmax(220px, 1fr);
+  grid-template-columns: 42px minmax(180px, 1fr);
   gap: 8px;
   align-items: center;
 }
@@ -384,6 +433,7 @@ td {
 .note-input {
   display: block;
   width: 100%;
+  min-width: 180px;
   min-height: 68px;
   overflow: hidden;
   resize: none;
@@ -477,7 +527,7 @@ td {
 }
 
 .rating-cell {
-  min-width: 136px;
+  min-width: 152px;
 }
 
 .rating-stars {
@@ -485,7 +535,8 @@ td {
   gap: 2px;
   align-items: center;
   border-radius: 8px;
-  padding: 0;
+  margin-left: -12px;
+  padding: 0 0 0 12px;
   background: transparent;
   box-shadow: none;
   cursor: pointer;
@@ -548,7 +599,10 @@ td {
 }
 
 .edit-button {
+  display: inline-flex;
   min-height: 38px;
+  align-items: center;
+  justify-content: center;
   border: 0;
   border-radius: 999px;
   padding: 0 14px;
@@ -560,9 +614,38 @@ td {
   transition: background 160ms ease, transform 160ms ease;
 }
 
+.edit-icon-button {
+  width: 32px;
+  min-height: 32px;
+  border-radius: 8px;
+  padding: 0;
+  background: transparent;
+  color: #8b8f99;
+  font-size: 0;
+}
+
+.edit-icon-button::before {
+  width: 18px;
+  height: 18px;
+  background: currentColor;
+  content: "";
+  mask: url("../assets/edit.svg") center / contain no-repeat;
+  -webkit-mask: url("../assets/edit.svg") center / contain no-repeat;
+}
+
+.edit-icon-button:hover:not(:disabled) {
+  background: rgba(42, 48, 68, 0.06);
+  color: #606570;
+}
+
 .edit-button:hover:not(:disabled) {
   background: rgba(118, 87, 255, 0.16);
   transform: translateY(-1px);
+}
+
+.edit-button.edit-icon-button:hover:not(:disabled) {
+  background: rgba(42, 48, 68, 0.06);
+  color: #606570;
 }
 
 .edit-button.saving-state {
@@ -576,10 +659,14 @@ td {
 
 .action-cell {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   align-items: center;
-  min-width: 132px;
+  min-width: 112px;
+}
+
+body[data-page="wishlist"] .action-cell {
+  min-width: 244px;
 }
 
 .move-button {
@@ -592,6 +679,7 @@ td {
   cursor: pointer;
   font: inherit;
   font-weight: 800;
+  white-space: nowrap;
   transition: background 160ms ease, transform 160ms ease;
 }
 

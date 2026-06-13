@@ -5,6 +5,9 @@ const urlInput = document.querySelector("#perfume-url");
 const searchInput = document.querySelector("#table-search");
 const tableToolbar = document.querySelector(".table-toolbar");
 const searchField = document.querySelector(".search-field");
+const table = document.querySelector("table");
+const tableWrap = document.querySelector(".table-wrap");
+const tableHeaders = document.querySelectorAll("thead th");
 const sortableHeaders = document.querySelectorAll("th.sortable");
 const logoutLink = document.querySelector("#logout-link");
 const currentPage = typeof PAGE === "string" ? PAGE : document.body.dataset.page || "library";
@@ -37,6 +40,8 @@ let currentSort = { column: "creation_date", direction: "desc" };
 let currentSearch = "";
 let editingPerfumeId = null;
 let editingBackup = null;
+const columnWidthsStorageKey = `fragrantica-column-widths-${currentPage}`;
+let tableCols = [];
 
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
@@ -228,6 +233,172 @@ function updatePerfumeInState(updated) {
   allPerfumes = allPerfumes.map((perfume) => (perfume.id === updated.id ? updated : perfume));
 }
 
+function columnMinWidth(header) {
+  const label = header.textContent.trim().toLowerCase();
+  const column = header.dataset.sort || label;
+
+  if (column === "name") return 140;
+  if (column === "brand") return 120;
+  if (column === "rating") return 152;
+  if (label.startsWith("pyramid")) return 280;
+  if (label.startsWith("notes")) return 220;
+  if (label.startsWith("actions")) return isWishlistPage ? 268 : 136;
+
+  return 96;
+}
+
+function columnDefaultWidth(header) {
+  const label = header.textContent.trim().toLowerCase();
+  const column = header.dataset.sort || label;
+
+  if (column === "name") return 220;
+  if (column === "brand") return 160;
+  if (column === "rating") return 152;
+  if (label.startsWith("pyramid")) return 360;
+  if (label.startsWith("notes")) return 320;
+  if (label.startsWith("actions")) return columnMinWidth(header);
+
+  return columnMinWidth(header);
+}
+
+function columnWidthTotal(widths) {
+  return widths.reduce((total, width) => total + width, 0);
+}
+
+function parentTableWidth() {
+  return tableWrap ? tableWrap.getBoundingClientRect().width : columnWidthTotal(Array.from(tableHeaders, columnMinWidth));
+}
+
+function storedColumnWidths() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(columnWidthsStorageKey) || "null");
+    if (!Array.isArray(parsed) || parsed.length !== tableHeaders.length) return null;
+    const widths = parsed.map((width) => Number(width));
+    return widths.every((width) => Number.isFinite(width) && width > 0) ? widths : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function saveColumnWidths(widths) {
+  try {
+    localStorage.setItem(columnWidthsStorageKey, JSON.stringify(widths.map((width) => Math.round(width))));
+  } catch (error) {
+    // Ignore storage failures so resizing still works in restricted browsing modes.
+  }
+}
+
+function fittedColumnWidths(sourceWidths, minWidths) {
+  const minTotal = columnWidthTotal(minWidths);
+  const targetWidth = Math.max(parentTableWidth(), minTotal);
+  const extraSpace = targetWidth - minTotal;
+
+  if (extraSpace <= 0) return minWidths.slice();
+
+  const widths = sourceWidths.map((width, index) => Math.max(Number(width) || minWidths[index], minWidths[index]));
+  let extraWeights = widths.map((width, index) => Math.max(0, width - minWidths[index]));
+  let extraTotal = columnWidthTotal(extraWeights);
+
+  if (extraTotal <= 0) {
+    extraWeights = minWidths.map((width) => width);
+    extraTotal = columnWidthTotal(extraWeights);
+  }
+
+  const fitted = minWidths.map((minWidth, index) => minWidth + ((extraWeights[index] / extraTotal) * extraSpace));
+  fitted[fitted.length - 1] += targetWidth - columnWidthTotal(fitted);
+
+  return fitted;
+}
+
+function ensureTableColGroup() {
+  let colGroup = table.querySelector("colgroup");
+  if (!colGroup) {
+    colGroup = document.createElement("colgroup");
+    table.insertBefore(colGroup, table.firstElementChild);
+  }
+
+  colGroup.innerHTML = "";
+  tableCols = Array.from(tableHeaders, () => {
+    const col = document.createElement("col");
+    colGroup.appendChild(col);
+    return col;
+  });
+}
+
+function resizeColumnPair(widths, minWidths, leftIndex, delta) {
+  const rightIndex = leftIndex + 1;
+  const maxLeftGrowth = widths[rightIndex] - minWidths[rightIndex];
+  const maxLeftShrink = widths[leftIndex] - minWidths[leftIndex];
+  const appliedDelta = Math.min(maxLeftGrowth, Math.max(-maxLeftShrink, delta));
+
+  widths[leftIndex] += appliedDelta;
+  widths[rightIndex] -= appliedDelta;
+}
+
+function applyColumnWidths(widths) {
+  const tableWidth = columnWidthTotal(widths);
+  tableCols.forEach((col, index) => {
+    col.style.width = `${widths[index]}px`;
+  });
+  table.style.width = `${tableWidth}px`;
+  table.style.minWidth = `${tableWidth}px`;
+}
+
+function initializeColumnResize() {
+  if (!table || !tableHeaders.length) return;
+
+  ensureTableColGroup();
+
+  const minWidths = Array.from(tableHeaders, columnMinWidth);
+  const storedWidths = storedColumnWidths();
+  const defaultWidths = Array.from(tableHeaders, columnDefaultWidth);
+  const widths = fittedColumnWidths(storedWidths || defaultWidths, minWidths);
+
+  applyColumnWidths(widths);
+
+  tableHeaders.forEach((header, index) => {
+    if (index === tableHeaders.length - 1) return;
+
+    const handle = document.createElement("span");
+    handle.className = "column-resize-handle";
+    handle.setAttribute("aria-hidden", "true");
+    header.appendChild(handle);
+
+    handle.addEventListener("click", (event) => event.stopPropagation());
+    handle.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const startX = event.clientX;
+      const startWidths = widths.slice();
+
+      function handleMouseMove(moveEvent) {
+        const delta = moveEvent.clientX - startX;
+        for (let i = 0; i < widths.length; i += 1) widths[i] = startWidths[i];
+        resizeColumnPair(widths, minWidths, index, delta);
+        applyColumnWidths(widths);
+      }
+
+      function handleMouseUp() {
+        document.body.classList.remove("resizing-column");
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+        saveColumnWidths(widths);
+      }
+
+      document.body.classList.add("resizing-column");
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+    });
+  });
+
+  window.addEventListener("resize", () => {
+    const fittedWidths = fittedColumnWidths(widths, minWidths);
+    for (let index = 0; index < widths.length; index += 1) widths[index] = fittedWidths[index];
+    applyColumnWidths(widths);
+  });
+}
+
 function clearEditingState() {
   editingPerfumeId = null;
   editingBackup = null;
@@ -310,8 +481,8 @@ async function saveDetails(perfume, row, button) {
 
 function normalizedRating(value) {
   const rating = Number(value);
-  if (!Number.isInteger(rating)) return 3;
-  return Math.min(5, Math.max(1, rating));
+  if (!Number.isInteger(rating)) return 0;
+  return Math.min(5, Math.max(0, rating));
 }
 
 function updateStarDisplay(container, rating) {
@@ -454,7 +625,7 @@ function renderPerfumeRow(perfume) {
   const pyramidCell = isEditing
     ? `<td class="pyramid-cell"><div class="pyramid-edit-inputs">${renderPyramidEditHTML(perfume.pyramid_data)}</div></td>`
     : `<td class="pyramid-cell"><div class="pyramid-levels">${renderPyramidHTML(perfume.pyramid_data)}</div></td>`;
-  const editButton = `<button class="edit-button ${isEditing ? "saving-state" : ""}" type="button">${isEditing ? "Save" : "Edit"}</button>`;
+  const editButton = `<button class="edit-button ${isEditing ? "saving-state" : "edit-icon-button"}" type="button" aria-label="${isEditing ? "Save details" : "Edit details"}">${isEditing ? "Save" : ""}</button>`;
 
   if (isWishlistPage) {
     row.innerHTML = `
@@ -463,9 +634,9 @@ function renderPerfumeRow(perfume) {
       ${pyramidCell}
       <td>
         <div class="action-cell">
-          ${editButton}
-          ${isEditing ? "" : `
             <button class="move-button" type="button">Move to Library</button>
+            ${editButton}
+            ${isEditing ? "" : `
             <a class="action-link" href="${escapeHtml(perfume.original_address)}" target="_blank" rel="noreferrer" aria-label="Open ${escapeHtml(perfume.name)} on Fragrantica">Open</a>
             <button class="delete-button" type="button">Delete</button>
           `}
@@ -506,7 +677,7 @@ function renderPerfumeRow(perfume) {
         class="rating-stars ${isEditing ? "disabled" : ""}"
         role="slider"
         tabindex="${isEditing ? "-1" : "0"}"
-        aria-valuemin="1"
+        aria-valuemin="0"
         aria-valuemax="5"
         aria-valuenow="${rating}"
         aria-label="Rating ${rating} out of 5"
@@ -551,9 +722,17 @@ function renderPerfumeRow(perfume) {
 
   const ratingStars = row.querySelector(".rating-stars");
   ratingStars.addEventListener("click", (event) => {
+    if (ratingStars.classList.contains("saving") || ratingStars.classList.contains("disabled")) return;
     const star = event.target.closest(".rating-star");
-    if (!star || ratingStars.classList.contains("saving") || ratingStars.classList.contains("disabled")) return;
-    updateRating(perfume, ratingStars, Number(star.dataset.value));
+    if (star) {
+      updateRating(perfume, ratingStars, Number(star.dataset.value));
+      return;
+    }
+
+    const firstStar = ratingStars.querySelector(".rating-star");
+    if (firstStar && event.clientX < firstStar.getBoundingClientRect().left) {
+      updateRating(perfume, ratingStars, 0);
+    }
   });
   ratingStars.addEventListener("mouseover", (event) => {
     const star = event.target.closest(".rating-star");
@@ -692,6 +871,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 window.addEventListener("resize", autoResizeAllTextareas);
+initializeColumnResize();
 
 if (logoutLink) {
   logoutLink.addEventListener("click", (event) => {
