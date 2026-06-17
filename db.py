@@ -226,6 +226,19 @@ def run_migrations() -> None:
                 EXECUTE FUNCTION prevent_duplicate_wishlist_insert();
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fragrantica_note_profiles (
+                    note_id      TEXT PRIMARY KEY,
+                    note_name    TEXT NOT NULL,
+                    note_url     TEXT NOT NULL,
+                    odor_profile TEXT,
+                    source       TEXT DEFAULT 'fragrantica',
+                    fetched_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
 
 
 def get_or_create_user(keycloak_uuid: str) -> int:
@@ -583,3 +596,68 @@ def delete_from_wishlist(wishlist_id: int, user_id: int) -> bool:
                 (wishlist_id, user_id),
             )
             return cur.rowcount > 0
+
+
+def get_note_profile(note_id: str) -> dict | None:
+    """Return cached note profile by note_id, or None if not present."""
+    if not note_id:
+        return None
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT note_id, note_name, note_url, odor_profile, source,
+                       fetched_at, updated_at
+                FROM fragrantica_note_profiles
+                WHERE note_id = %s;
+                """,
+                (note_id,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
+def get_note_profiles(note_ids: list[str]) -> dict[str, dict]:
+    """Bulk fetch note profiles; returns a dict keyed by note_id."""
+    if not note_ids:
+        return {}
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT note_id, note_name, note_url, odor_profile, source,
+                       fetched_at, updated_at
+                FROM fragrantica_note_profiles
+                WHERE note_id = ANY(%s);
+                """,
+                (list(note_ids),),
+            )
+            return {row["note_id"]: dict(row) for row in cur.fetchall()}
+
+
+def upsert_note_profile(
+    note_id: str,
+    note_name: str,
+    note_url: str,
+    odor_profile: str,
+    source: str = "fragrantica",
+) -> None:
+    """Insert or update a cached note profile."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO fragrantica_note_profiles (
+                    note_id, note_name, note_url, odor_profile, source,
+                    fetched_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (note_id) DO UPDATE
+                SET note_name = EXCLUDED.note_name,
+                    note_url = EXCLUDED.note_url,
+                    odor_profile = EXCLUDED.odor_profile,
+                    source = EXCLUDED.source,
+                    updated_at = CURRENT_TIMESTAMP;
+                """,
+                (note_id, note_name, note_url, odor_profile, source),
+            )

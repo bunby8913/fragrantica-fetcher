@@ -13,12 +13,16 @@ Usage:
 import re
 import sys
 import argparse
+from urllib.parse import urljoin
 import curl_cffi.requests as requests
 from bs4 import BeautifulSoup
 
 
+FRAGRANTICA_BASE = "https://www.fragrantica.com"
+
+
 def fetch_page(url: str) -> str:
-    """Fetch HTML content from a fragrantica perfume URL via curl_cffi."""
+    """Fetch HTML content from a fragrantica URL via curl_cffi."""
     resp = requests.get(url, impersonate="chrome120", timeout=30)
     resp.raise_for_status()
     return resp.text
@@ -202,17 +206,50 @@ def _parse_note_link(note_link) -> dict | None:
         id_match = re.search(r"-(\d+)\.html$", href)
         note_id = id_match.group(1) if id_match else ""
 
+    note_url = urljoin(FRAGRANTICA_BASE, href) if href else ""
+
     opacity_match = re.search(r"opacity:\s*([\d.]+)", style)
     opacity = float(opacity_match.group(1)) if opacity_match else 1.0
 
     return {
         "name": note_name,
         "note_id": note_id,
+        "note_url": note_url,
         "image_url": img_src,
         "image_width": img_width,
         "image_height": img_height,
         "opacity": round(opacity, 4),
     }
+
+
+def extract_note_odor_profile(html: str) -> str:
+    """Parse a fragrantica note page and return the odor profile text.
+
+    Returns an empty string if no odor profile is present. The text is
+    whitespace-normalized (newlines/tabs collapsed to single spaces,
+    ends stripped). Only the description directly following the
+    literal ``Odor profile:`` label is captured; the parse stops at
+    the first occurrence of the ``Most popular perfumes`` section
+    boundary, or at the ``Total Agreement`` label, or at the end of
+    the document.
+    """
+    if not html:
+        return ""
+
+    soup = BeautifulSoup(html, "lxml")
+    text = soup.get_text("\n", strip=True)
+
+    match = re.search(
+        r"Odor profile:\s*(.*?)(?:\n\s*Most popular perfumes|\n\s*Total Agreement|\Z)",
+        text,
+        re.DOTALL,
+    )
+    if not match:
+        return ""
+
+    profile = match.group(1)
+    profile = re.sub(r"\s+", " ", profile).strip()
+    return profile
 
 
 def _parse_image_dimensions(img) -> tuple[float, float]:

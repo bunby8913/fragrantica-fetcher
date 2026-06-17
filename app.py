@@ -21,6 +21,7 @@ from db import (
     delete_from_wishlist,
     delete_perfume,
     get_all_perfumes,
+    get_note_profile,
     get_or_create_user,
     get_wishlist,
     move_to_library,
@@ -30,6 +31,13 @@ from db import (
     update_note,
     update_size,
     update_wishlist_details,
+)
+from enricher import (
+    backfill_note_profiles,
+    collect_unique_note_ids,
+    enrich_notes_with_odor_profiles,
+    enrich_single_note,
+    missing_note_ids,
 )
 from scraper import extract_perfume_data, fetch_page
 
@@ -62,6 +70,30 @@ def _is_valid_fragrantica_url(url: str) -> bool:
 def _get_user_id() -> int:
     keycloak_uuid = request.keycloak_user.get("sub", "")
     return get_or_create_user(keycloak_uuid)
+
+
+def _parse_pyramid_data(pyramid_data) -> dict:
+    if not pyramid_data:
+        return {}
+    if isinstance(pyramid_data, dict):
+        return pyramid_data
+    try:
+        return json.loads(pyramid_data)
+    except (TypeError, ValueError):
+        return {}
+
+
+def _all_user_pyramids(user_id: int) -> list[dict]:
+    pyramids: list[dict] = []
+    for row in get_all_perfumes(user_id):
+        pyramid = _parse_pyramid_data(row.get("pyramid_data"))
+        if pyramid:
+            pyramids.append(pyramid)
+    for row in get_wishlist(user_id):
+        pyramid = _parse_pyramid_data(row.get("pyramid_data"))
+        if pyramid:
+            pyramids.append(pyramid)
+    return pyramids
 
 
 @app.route("/")
@@ -170,12 +202,20 @@ def add_perfume_api():
     if not data.get("name"):
         return jsonify({"error": "Could not extract perfume name from page"}), 422
 
+    pyramid = data.get("pyramid", {}) or {}
+    try:
+        enrich_notes_with_odor_profiles(pyramid)
+    except Exception:
+        for level in ("top_notes", "middle_notes", "base_notes"):
+            for note in pyramid.get(level, []) or []:
+                note.setdefault("odor_profile", "")
+
     try:
         user_id = _get_user_id()
         row = add_perfume(
             name=data.get("name", ""),
             brand=data.get("brand", ""),
-            pyramid_data=json.dumps(data.get("pyramid", {})),
+            pyramid_data=json.dumps(pyramid),
             original_address=url,
             user_id=user_id,
         )
@@ -203,12 +243,20 @@ def add_to_wishlist_api():
     if not data.get("name"):
         return jsonify({"error": "Could not extract perfume name from page"}), 422
 
+    pyramid = data.get("pyramid", {}) or {}
+    try:
+        enrich_notes_with_odor_profiles(pyramid)
+    except Exception:
+        for level in ("top_notes", "middle_notes", "base_notes"):
+            for note in pyramid.get(level, []) or []:
+                note.setdefault("odor_profile", "")
+
     try:
         user_id = _get_user_id()
         row = add_to_wishlist(
             name=data.get("name", ""),
             brand=data.get("brand", ""),
-            pyramid_data=json.dumps(data.get("pyramid", {})),
+            pyramid_data=json.dumps(pyramid),
             original_address=url,
             user_id=user_id,
         )
@@ -345,6 +393,52 @@ def delete_wishlist_item_api(wishlist_id: int):
     if not delete_from_wishlist(wishlist_id, user_id):
         return jsonify({"error": "Wishlist item not found"}), 404
     return jsonify({"success": True})
+
+
+@app.get("/note_profile/<note_id>")
+@require_auth
+def get_note_profile_api(note_id: str):
+    profile = get_note_profile(note_id)
+    if not profile:
+        return jsonify({"note_id": note_id, "odor_profile": ""}), 200
+    return jsonify(_json_ready(profile))
+
+
+@app.post("/enrich_note")
+@require_auth
+def enrich_note_api():
+    payload = request.get_json(silent=True) or {}
+    note_id = str(payload.get("note_id", "")).strip()
+    note_name = str(payload.get("note_name", "")).strip()
+    note_url = str(payload.get("note_url", "")).strip()
+
+    if not note_id:
+        return jsonify({"error": "note_id is required"}), 400
+
+    odor_profile = enrich_single_note(
+        note_id=note_id,
+        note_name=note_name,
+        note_url=note_url,
+    )
+    return jsonify({"note_id": note_id, "odor_profile": odor_profile})
+
+
+@app.get("/note_profiles/missing")
+@require_auth
+def get_missing_note_ids_api():
+    user_id = _get_user_id()
+    pyramids = _all_user_pyramids(user_id)
+    return jsonify({"missing": missing_note_ids(pyramids)})
+
+
+@app.post("/backfill_note_profiles")
+@require_auth
+def backfill_note_profiles_api():
+    user_id = _get_user_id()
+    pyramids = _all_user_pyramids(user_id)
+    note_ids = collect_unique_note_ids(pyramids)
+    added = backfill_note_profiles(pyramids)
+    return jsonify({"checked": len(note_ids), "added": added})
 
 
 def create_app() -> Flask:

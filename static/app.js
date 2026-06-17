@@ -84,13 +84,20 @@ function renderPyramidHTML(value) {
   const levels = labels
     .map(([key, label]) => {
       const notes = pyramid[key] || [];
-      const names = notes.map((note) => note.name).filter(Boolean).join(", ");
-      if (!names) return "";
+      if (!notes.length) return "";
+
+      const rendered = [];
+      notes.forEach((note, index) => {
+        if (!note || !note.name) return;
+        if (rendered.length) rendered.push(", ");
+        rendered.push(renderNoteBadge(note));
+      });
+      if (!rendered.length) return "";
 
       return `
         <div class="pyramid-level">
           <span class="level-tag">${escapeHtml(label)}</span>
-          <span>${escapeHtml(names)}</span>
+          <span class="notes-container">${rendered.join("")}</span>
         </div>
       `;
     })
@@ -98,6 +105,15 @@ function renderPyramidHTML(value) {
     .join("");
 
   return levels || `<span class="muted-text">No notes</span>`;
+}
+
+function renderNoteBadge(note) {
+  const name = note.name || "";
+  const odorProfile = (note.odor_profile || "").trim();
+  const noteUrl = note.note_url || "";
+  const imageUrl = note.image_url || "";
+  const noteId = note.note_id || "";
+  return `<span class="note-badge" data-note-id="${escapeHtml(noteId)}" data-note-name="${escapeHtml(name)}" data-odor-profile="${escapeHtml(odorProfile)}" data-note-url="${escapeHtml(noteUrl)}" data-note-image="${escapeHtml(imageUrl)}" tabindex="0" role="button" aria-label="View odor profile for ${escapeHtml(name)}">${escapeHtml(name)}</span>`;
 }
 
 function pyramidLevelText(value, key) {
@@ -780,6 +796,158 @@ function renderPerfumes() {
   }
   requestAnimationFrame(autoResizeAllTextareas);
 }
+
+const noteProfileCache = {};
+const inFlightEnrichments = new Set();
+
+function getNotePopover() {
+  let popover = document.getElementById("note-popover");
+  if (popover) return popover;
+  popover = document.createElement("div");
+  popover.id = "note-popover";
+  popover.className = "note-popover";
+  popover.setAttribute("role", "tooltip");
+  popover.setAttribute("aria-hidden", "true");
+  document.body.appendChild(popover);
+  return popover;
+}
+
+function positionNotePopover(badge, popover) {
+  const rect = badge.getBoundingClientRect();
+  const popoverRect = popover.getBoundingClientRect();
+  const top = window.scrollY + rect.bottom + 8;
+  let left = window.scrollX + rect.left;
+  const maxLeft = window.scrollX + window.innerWidth - popoverRect.width - 12;
+  if (left > maxLeft) left = Math.max(window.scrollX + 12, maxLeft);
+  popover.style.top = `${top}px`;
+  popover.style.left = `${left}px`;
+}
+
+function renderNotePopoverContent(name, profile, noteUrl, imageUrl) {
+  const trimmed = (profile || "").trim();
+  const profileHtml = trimmed
+    ? `<p class="note-popover-profile">${escapeHtml(trimmed)}</p>`
+    : `<p class="note-popover-profile note-popover-empty">No odor profile found.</p>`;
+  const imageHtml = imageUrl
+    ? `<img class="note-popover-image" src="${escapeHtml(imageUrl)}" alt="">`
+    : "";
+  const linkHtml = noteUrl
+    ? `<a class="note-popover-link" href="${escapeHtml(noteUrl)}" target="_blank" rel="noreferrer">View on Fragrantica</a>`
+    : "";
+
+  return `
+    <div class="note-popover-inner">
+      ${imageHtml}
+      <div class="note-popover-body">
+        <h4 class="note-popover-title">${escapeHtml(name)}</h4>
+        ${profileHtml}
+        ${linkHtml}
+      </div>
+    </div>
+  `;
+}
+
+function applyPopover(badge, profile) {
+  const popover = getNotePopover();
+  const name = badge.dataset.noteName || "";
+  const noteUrl = badge.dataset.noteUrl || "";
+  const imageUrl = badge.dataset.noteImage || "";
+  popover.innerHTML = renderNotePopoverContent(name, profile, noteUrl, imageUrl);
+  popover.classList.add("visible");
+  popover.setAttribute("aria-hidden", "false");
+  positionNotePopover(badge, popover);
+}
+
+function showNotePopover(badge) {
+  const name = badge.dataset.noteName || "";
+  const noteId = badge.dataset.noteId || "";
+  const profile = (badge.dataset.odorProfile || "").trim();
+
+  if (profile) {
+    applyPopover(badge, profile);
+    return;
+  }
+
+  if (noteId && Object.prototype.hasOwnProperty.call(noteProfileCache, noteId)) {
+    applyPopover(badge, noteProfileCache[noteId] || "");
+    return;
+  }
+
+  const popover = getNotePopover();
+  popover.innerHTML = renderNotePopoverContent(name, "", "", badge.dataset.noteImage || "");
+  popover.classList.add("visible");
+  popover.setAttribute("aria-hidden", "false");
+  positionNotePopover(badge, popover);
+
+  if (!noteId || inFlightEnrichments.has(noteId)) return;
+
+  inFlightEnrichments.add(noteId);
+  window.Auth.authFetch("/enrich_note", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      note_id: noteId,
+      note_name: name,
+      note_url: badge.dataset.noteUrl || "",
+    }),
+  })
+    .then((response) => response.json().catch(() => ({})).then((data) => ({ ok: response.ok, data })))
+    .then(({ ok, data }) => {
+      const fetched = ok && data && typeof data.odor_profile === "string" ? data.odor_profile : "";
+      noteProfileCache[noteId] = fetched;
+      badge.dataset.odorProfile = fetched;
+      if (!document.body.contains(badge)) return;
+      const popoverEl = document.getElementById("note-popover");
+      if (!popoverEl || !popoverEl.classList.contains("visible")) return;
+      applyPopover(badge, fetched);
+    })
+    .catch(() => {
+      noteProfileCache[noteId] = "";
+    })
+    .finally(() => {
+      inFlightEnrichments.delete(noteId);
+    });
+}
+
+function hideNotePopover() {
+  const popover = document.getElementById("note-popover");
+  if (!popover) return;
+  popover.classList.remove("visible");
+  popover.setAttribute("aria-hidden", "true");
+}
+
+document.addEventListener("mouseover", (event) => {
+  const badge = event.target.closest(".note-badge");
+  if (badge) showNotePopover(badge);
+});
+
+document.addEventListener("mouseout", (event) => {
+  const badge = event.target.closest(".note-badge");
+  if (badge) hideNotePopover();
+});
+
+document.addEventListener("focusin", (event) => {
+  const badge = event.target.closest(".note-badge");
+  if (badge) showNotePopover(badge);
+});
+
+document.addEventListener("focusout", (event) => {
+  const badge = event.target.closest(".note-badge");
+  if (badge) hideNotePopover();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") hideNotePopover();
+});
+
+document.addEventListener("click", (event) => {
+  const link = event.target.closest(".note-popover-link");
+  if (link) return;
+  const badge = event.target.closest(".note-badge");
+  if (!badge) return;
+  const noteUrl = badge.dataset.noteUrl || "";
+  if (noteUrl) window.open(noteUrl, "_blank", "noopener,noreferrer");
+});
 
 async function loadPerfumes() {
   try {
