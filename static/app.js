@@ -49,6 +49,58 @@ function setStatus(message, isError = false) {
   statusEl.classList.toggle("error", isError);
 }
 
+function confirmAction({ title, message, confirmLabel = "Confirm", cancelLabel = "Cancel" }) {
+  return new Promise((resolve) => {
+    const previousFocus = document.activeElement;
+    const overlay = document.createElement("div");
+    overlay.className = "confirm-overlay";
+    overlay.innerHTML = `
+      <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message">
+        <div class="confirm-dialog-copy">
+          <h3 id="confirm-dialog-title">${escapeHtml(title)}</h3>
+          <p id="confirm-dialog-message">${escapeHtml(message)}</p>
+        </div>
+        <div class="confirm-dialog-actions">
+          <button class="confirm-cancel-button" type="button">${escapeHtml(cancelLabel)}</button>
+          <button class="confirm-delete-button" type="button">${escapeHtml(confirmLabel)}</button>
+        </div>
+      </section>
+    `;
+
+    const cancelButton = overlay.querySelector(".confirm-cancel-button");
+    const confirmButton = overlay.querySelector(".confirm-delete-button");
+
+    function close(result) {
+      document.removeEventListener("keydown", handleKeydown);
+      overlay.remove();
+      if (previousFocus && typeof previousFocus.focus === "function") previousFocus.focus();
+      resolve(result);
+    }
+
+    function handleKeydown(event) {
+      if (event.key === "Escape") close(false);
+      if (event.key !== "Tab") return;
+
+      const focusable = [cancelButton, confirmButton];
+      const currentIndex = focusable.indexOf(document.activeElement);
+      const direction = event.shiftKey ? -1 : 1;
+      const nextIndex = currentIndex === -1 ? 0 : (currentIndex + direction + focusable.length) % focusable.length;
+      event.preventDefault();
+      focusable[nextIndex].focus();
+    }
+
+    cancelButton.addEventListener("click", () => close(false));
+    confirmButton.addEventListener("click", () => close(true));
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) close(false);
+    });
+
+    document.body.appendChild(overlay);
+    document.addEventListener("keydown", handleKeydown);
+    cancelButton.focus();
+  });
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -594,7 +646,13 @@ async function updateRating(perfume, container, rating) {
 
 async function deletePerfume(perfume, button) {
   const itemType = isWishlistPage ? "wishlist item" : "perfume";
-  if (!window.confirm(`Delete ${perfume.name} by ${perfume.brand}?`)) return;
+  const confirmed = await confirmAction({
+    title: `Delete ${itemType}?`,
+    message: `Delete ${perfume.name} by ${perfume.brand}? This cannot be undone.`,
+    confirmLabel: "Delete",
+    cancelLabel: "Cancel",
+  });
+  if (!confirmed) return;
 
   button.disabled = true;
   try {
