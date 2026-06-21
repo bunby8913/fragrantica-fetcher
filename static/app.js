@@ -12,6 +12,7 @@ const sortableHeaders = document.querySelectorAll("th.sortable");
 const logoutLink = document.querySelector("#logout-link");
 const currentPage = typeof PAGE === "string" ? PAGE : document.body.dataset.page || "library";
 const isWishlistPage = currentPage === "wishlist";
+const isArchivePage = currentPage === "archive";
 
 const api = isWishlistPage
   ? {
@@ -22,7 +23,7 @@ const api = isWishlistPage
     move: (id) => `/wishlist/${id}/move`,
   }
   : {
-    getAll: "/get_all_perfume",
+    getAll: isArchivePage ? "/get_archived_perfumes" : "/get_all_perfume",
     add: "/add_perfume",
     delete: (id) => `/perfume/${id}`,
     details: (id) => `/perfume/${id}/details`,
@@ -164,19 +165,9 @@ function pyramidSearchText(value) {
     .toLowerCase();
 }
 
-function autoResizeTextarea(textarea) {
-  textarea.style.height = "auto";
-
-  const cell = textarea.closest(".note-cell");
-  const cellStyle = cell ? window.getComputedStyle(cell) : null;
-  const cellHeight = cell ? cell.clientHeight : 0;
-  const verticalPadding = cellStyle ? parseFloat(cellStyle.paddingTop) + parseFloat(cellStyle.paddingBottom) : 0;
-
-  textarea.style.height = `${Math.max(textarea.scrollHeight, cellHeight - verticalPadding)}px`;
-}
-
-function autoResizeAllTextareas() {
-  document.querySelectorAll(".note-input").forEach(autoResizeTextarea);
+function syncNoteInputMirror(textarea) {
+  const wrapper = textarea.closest(".note-input-wrap");
+  if (wrapper) wrapper.dataset.replicatedValue = `${textarea.value} `;
 }
 
 function sanitizeUrlInput(value) {
@@ -530,7 +521,7 @@ async function updateNote(perfume, textarea) {
     setStatus(`Updated note for ${updated.name}.`);
   } catch (error) {
     textarea.value = textarea.dataset.originalValue;
-    autoResizeTextarea(textarea);
+    syncNoteInputMirror(textarea);
     setStatus(error.message, true);
   } finally {
     textarea.disabled = false;
@@ -550,8 +541,18 @@ async function updateSize(perfume, select) {
     const updated = await response.json();
     if (!response.ok) throw new Error(updated.error || "Could not update size");
 
-    updatePerfumeInState(updated);
-    setStatus(`Updated size for ${updated.name}.`);
+    if (currentPage === "library" && Number(updated.size) === 3) {
+      allPerfumes = allPerfumes.filter((item) => item.id !== updated.id);
+      renderPerfumes();
+      setStatus(`Moved ${updated.name} to archive.`);
+    } else if (isArchivePage && Number(updated.size) !== 3) {
+      allPerfumes = allPerfumes.filter((item) => item.id !== updated.id);
+      renderPerfumes();
+      setStatus(`Moved ${updated.name} back to library.`);
+    } else {
+      updatePerfumeInState(updated);
+      setStatus(`Updated size for ${updated.name}.`);
+    }
   } catch (error) {
     select.value = String(perfume.size ?? 0);
     setStatus(error.message, true);
@@ -603,7 +604,7 @@ async function deletePerfume(perfume, button) {
 
     allPerfumes = allPerfumes.filter((item) => item.id !== perfume.id);
     renderPerfumes();
-    setStatus(`Deleted ${perfume.name} from ${isWishlistPage ? "wishlist" : "library"}.`);
+    setStatus(`Deleted ${perfume.name} from ${isWishlistPage ? "wishlist" : isArchivePage ? "archive" : "library"}.`);
   } catch (error) {
     setStatus(error.message, true);
   } finally {
@@ -713,7 +714,9 @@ function renderPerfumeRow(perfume) {
       .map(([value, label]) => `<option value="${value}" ${Number(value) === size ? "selected" : ""}>${escapeHtml(label)}</option>`)
       .join("")}
       </select>
-      <textarea class="note-input" rows="1" aria-label="Note for ${escapeHtml(perfume.name)}" ${isEditing ? "disabled" : ""}>${escapeHtml(note)}</textarea>
+    <div class="note-input-wrap" data-replicated-value="${escapeHtml(`${note} `)}">
+        <textarea class="note-input" rows="1" aria-label="Note for ${escapeHtml(perfume.name)}" ${isEditing ? "disabled" : ""}>${escapeHtml(note)}</textarea>
+      </div>
     </td>
     <td>
       <div class="action-cell">
@@ -771,8 +774,7 @@ function renderPerfumeRow(perfume) {
 
   const noteInput = row.querySelector(".note-input");
   noteInput.dataset.originalValue = note;
-  requestAnimationFrame(() => autoResizeTextarea(noteInput));
-  noteInput.addEventListener("input", () => autoResizeTextarea(noteInput));
+  noteInput.addEventListener("input", () => syncNoteInputMirror(noteInput));
   noteInput.addEventListener("blur", () => updateNote(perfume, noteInput));
 
   const sizeSelect = row.querySelector(".note-size-select");
@@ -794,7 +796,6 @@ function renderPerfumes() {
   if (editingPerfumeId) {
     requestAnimationFrame(() => tableBody.querySelector(`tr[data-id="${editingPerfumeId}"] .edit-name-input`)?.focus());
   }
-  requestAnimationFrame(autoResizeAllTextareas);
 }
 
 const noteProfileCache = {};
@@ -831,9 +832,6 @@ function renderNotePopoverContent(name, profile, noteUrl, imageUrl) {
   const imageHtml = imageUrl
     ? `<img class="note-popover-image" src="${escapeHtml(imageUrl)}" alt="">`
     : "";
-  const linkHtml = noteUrl
-    ? `<a class="note-popover-link" href="${escapeHtml(noteUrl)}" target="_blank" rel="noreferrer">View on Fragrantica</a>`
-    : "";
 
   return `
     <div class="note-popover-inner">
@@ -841,7 +839,6 @@ function renderNotePopoverContent(name, profile, noteUrl, imageUrl) {
       <div class="note-popover-body">
         <h4 class="note-popover-title">${escapeHtml(name)}</h4>
         ${profileHtml}
-        ${linkHtml}
       </div>
     </div>
   `;
@@ -957,7 +954,7 @@ async function loadPerfumes() {
 
     allPerfumes = perfumes;
     renderPerfumes();
-    const label = isWishlistPage ? "wishlist" : "perfume";
+    const label = isWishlistPage ? "wishlist" : (isArchivePage ? "archive" : "perfume");
     setStatus(perfumes.length ? `${perfumes.length} ${label} entries loaded.` : `No ${label} entries saved yet.`);
   } catch (error) {
     setStatus(error.message, true);
@@ -1016,8 +1013,13 @@ form.addEventListener("submit", async (event) => {
         if (!response.ok) throw new Error(perfume.error || "Could not add perfume");
 
         added.push(perfume);
-        allPerfumes = [perfume, ...allPerfumes];
-        renderPerfumes();
+        const belongsOnPage = isWishlistPage
+          ? true
+          : isArchivePage ? Number(perfume.size) === 3 : Number(perfume.size) !== 3;
+        if (belongsOnPage) {
+          allPerfumes = [perfume, ...allPerfumes];
+          renderPerfumes();
+        }
       } catch (error) {
         failures.push({ url, message: error.message });
       }
@@ -1038,7 +1040,6 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
-window.addEventListener("resize", autoResizeAllTextareas);
 initializeColumnResize();
 
 if (logoutLink) {

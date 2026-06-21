@@ -21,6 +21,7 @@ from db import (
     delete_from_wishlist,
     delete_perfume,
     get_all_perfumes,
+    get_archived_perfumes,
     get_note_profile,
     get_or_create_user,
     get_wishlist,
@@ -106,6 +107,11 @@ def wishlist():
     return render_template("index.html", page="wishlist")
 
 
+@app.route("/archive")
+def archive():
+    return render_template("index.html", page="archive")
+
+
 @app.route("/login")
 def login():
     return render_template("login.html")
@@ -173,6 +179,14 @@ def auth_logout():
 def get_all_perfume():
     user_id = _get_user_id()
     perfumes = [_json_ready(row) for row in get_all_perfumes(user_id)]
+    return jsonify(perfumes)
+
+
+@app.get("/get_archived_perfumes")
+@require_auth
+def get_archived_perfumes_api():
+    user_id = _get_user_id()
+    perfumes = [_json_ready(row) for row in get_archived_perfumes(user_id)]
     return jsonify(perfumes)
 
 

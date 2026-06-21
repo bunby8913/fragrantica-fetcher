@@ -12,13 +12,23 @@
   <body data-page="{{ page }}">
     <main class="shell">
       <section class="hero">
-        <div>
-          <p class="eyebrow">{{ 'Wishlist' if page == 'wishlist' else 'Perfume Library' }}</p>
-        </div>
+        <form id="add-perfume-form" class="add-form">
+          <input
+            id="perfume-url"
+            name="url"
+            type="text"
+            inputmode="url"
+            placeholder="Paste URLs, separated by commas..."
+            autocomplete="off"
+            required
+          >
+          <button type="submit">{{ 'Add to Wishlist' if page == 'wishlist' else 'Add Perfume' }}</button>
+        </form>
         <div class="nav-group">
           <nav class="page-nav" aria-label="Page navigation">
             <a class="{{ 'active' if page == 'library' else '' }}" href="/">Library</a>
             <a class="{{ 'active' if page == 'wishlist' else '' }}" href="/wishlist">Wishlist</a>
+            <a class="{{ 'active' if page == 'archive' else '' }}" href="/archive">Archive</a>
           </nav>
           <a id="logout-link" href="/login">Logout</a>
         </div>
@@ -27,7 +37,7 @@
       <section class="card" aria-label="Perfume database table">
         <div class="table-toolbar">
           <div>
-            <h2>{{ 'Wishlist' if page == 'wishlist' else 'My Perfume Collection' }}</h2>
+            <h2>{{ 'Wishlist' if page == 'wishlist' else ('Archive' if page == 'archive' else 'My Perfume Collection') }}</h2>
             <p id="status" class="status">Loading database...</p>
           </div>
           <label class="search-field">
@@ -43,11 +53,11 @@
               <tr>
                 <th class="sortable" data-sort="name" scope="col">Name <span class="sort-indicator"></span></th>
                 <th class="sortable" data-sort="brand" scope="col">Brand <span class="sort-indicator"></span></th>
-                {% if page == 'library' %}
+                {% if page != 'wishlist' %}
                 <th class="sortable" data-sort="rating" scope="col">Rating <span class="sort-indicator"></span></th>
                 {% endif %}
                 <th>Pyramid</th>
-                {% if page == 'library' %}
+                {% if page != 'wishlist' %}
                 <th>Notes</th>
                 {% endif %}
                 <th>Actions</th>
@@ -58,21 +68,6 @@
         </div>
       </section>
     </main>
-
-    <section class="sticky-add-bar" aria-label="Add perfume">
-      <form id="add-perfume-form" class="add-form">
-        <input
-          id="perfume-url"
-          name="url"
-          type="text"
-          inputmode="url"
-          placeholder="Paste one or more fragrantica.com perfume URLs, separated by commas..."
-          autocomplete="off"
-          required
-        >
-        <button type="submit">{{ 'Add to Wishlist' if page == 'wishlist' else 'Add Perfume' }}</button>
-      </form>
-    </section>
 
     <script>const PAGE = "{{ page }}";</script>
     <script src="{{ url_for('static', filename='auth.js') }}"></script>

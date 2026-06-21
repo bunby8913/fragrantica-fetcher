@@ -317,7 +317,31 @@ def get_all_perfumes(user_id: int) -> list[dict]:
                     original_address,
                     size
                 FROM perfume
-                WHERE user_id = %s
+                WHERE user_id = %s AND size != 3
+                ORDER BY creation_date DESC, id DESC;
+                """,
+                (user_id,),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+
+def get_archived_perfumes(user_id: int) -> list[dict]:
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    brand,
+                    pyramid_data,
+                    rating,
+                    description,
+                    creation_date,
+                    original_address,
+                    size
+                FROM perfume
+                WHERE user_id = %s AND size = 3
                 ORDER BY creation_date DESC, id DESC;
                 """,
                 (user_id,),
