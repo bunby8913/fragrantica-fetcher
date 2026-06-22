@@ -170,7 +170,8 @@ function renderNoteBadge(note) {
   const noteUrl = note.note_url || "";
   const imageUrl = note.image_url || "";
   const noteId = note.note_id || "";
-  return `<span class="note-badge" data-note-id="${escapeHtml(noteId)}" data-note-name="${escapeHtml(name)}" data-odor-profile="${escapeHtml(odorProfile)}" data-note-url="${escapeHtml(noteUrl)}" data-note-image="${escapeHtml(imageUrl)}" tabindex="0" role="button" aria-label="View odor profile for ${escapeHtml(name)}">${escapeHtml(name)}</span>`;
+  const noteGroup = (note.group_name || "").trim();
+  return `<span class="note-badge" data-note-id="${escapeHtml(noteId)}" data-note-name="${escapeHtml(name)}" data-odor-profile="${escapeHtml(odorProfile)}" data-note-url="${escapeHtml(noteUrl)}" data-note-image="${escapeHtml(imageUrl)}" data-note-group="${escapeHtml(noteGroup)}" tabindex="0" role="button" aria-label="View odor profile for ${escapeHtml(name)}">${escapeHtml(name)}</span>`;
 }
 
 function pyramidLevelText(value, key) {
@@ -896,13 +897,17 @@ function positionNotePopover(badge, popover) {
   popover.style.left = `${left}px`;
 }
 
-function renderNotePopoverContent(name, profile, noteUrl, imageUrl) {
+function renderNotePopoverContent(name, profile, noteUrl, imageUrl, groupName) {
   const trimmed = (profile || "").trim();
   const profileHtml = trimmed
     ? `<p class="note-popover-profile">${escapeHtml(trimmed)}</p>`
     : `<p class="note-popover-profile note-popover-empty">No odor profile found.</p>`;
   const imageHtml = imageUrl
     ? `<img class="note-popover-image" src="${escapeHtml(imageUrl)}" alt="">`
+    : "";
+  const groupTrimmed = (groupName || "").trim();
+  const groupHtml = groupTrimmed
+    ? `<span class="note-popover-group-pill">${escapeHtml(groupTrimmed)}</span>`
     : "";
 
   return `
@@ -911,17 +916,19 @@ function renderNotePopoverContent(name, profile, noteUrl, imageUrl) {
       <div class="note-popover-body">
         <h4 class="note-popover-title">${escapeHtml(name)}</h4>
         ${profileHtml}
+        ${groupHtml}
       </div>
     </div>
   `;
 }
 
-function applyPopover(badge, profile) {
+function applyPopover(badge, profile, groupName) {
   const popover = getNotePopover();
   const name = badge.dataset.noteName || "";
   const noteUrl = badge.dataset.noteUrl || "";
   const imageUrl = badge.dataset.noteImage || "";
-  popover.innerHTML = renderNotePopoverContent(name, profile, noteUrl, imageUrl);
+  const group = groupName !== undefined ? groupName : (badge.dataset.noteGroup || "");
+  popover.innerHTML = renderNotePopoverContent(name, profile, noteUrl, imageUrl, group);
   popover.classList.add("visible");
   popover.setAttribute("aria-hidden", "false");
   positionNotePopover(badge, popover);
@@ -931,19 +938,25 @@ function showNotePopover(badge) {
   const name = badge.dataset.noteName || "";
   const noteId = badge.dataset.noteId || "";
   const profile = (badge.dataset.odorProfile || "").trim();
+  const group = (badge.dataset.noteGroup || "").trim();
 
-  if (profile) {
-    applyPopover(badge, profile);
+  if (profile || group) {
+    applyPopover(badge, profile, group);
     return;
   }
 
   if (noteId && Object.prototype.hasOwnProperty.call(noteProfileCache, noteId)) {
-    applyPopover(badge, noteProfileCache[noteId] || "");
+    const cached = noteProfileCache[noteId];
+    if (typeof cached === "object" && cached !== null) {
+      applyPopover(badge, cached.odor_profile || "", cached.group_name || "");
+    } else {
+      applyPopover(badge, cached || "", "");
+    }
     return;
   }
 
   const popover = getNotePopover();
-  popover.innerHTML = renderNotePopoverContent(name, "", "", badge.dataset.noteImage || "");
+  popover.innerHTML = renderNotePopoverContent(name, "", "", badge.dataset.noteImage || "", "");
   popover.classList.add("visible");
   popover.setAttribute("aria-hidden", "false");
   positionNotePopover(badge, popover);
@@ -962,16 +975,18 @@ function showNotePopover(badge) {
   })
     .then((response) => response.json().catch(() => ({})).then((data) => ({ ok: response.ok, data })))
     .then(({ ok, data }) => {
-      const fetched = ok && data && typeof data.odor_profile === "string" ? data.odor_profile : "";
-      noteProfileCache[noteId] = fetched;
-      badge.dataset.odorProfile = fetched;
+      const fetchedProfile = ok && data && typeof data.odor_profile === "string" ? data.odor_profile : "";
+      const fetchedGroup = ok && data && typeof data.group_name === "string" ? data.group_name : "";
+      noteProfileCache[noteId] = { odor_profile: fetchedProfile, group_name: fetchedGroup };
+      badge.dataset.odorProfile = fetchedProfile;
+      badge.dataset.noteGroup = fetchedGroup;
       if (!document.body.contains(badge)) return;
       const popoverEl = document.getElementById("note-popover");
       if (!popoverEl || !popoverEl.classList.contains("visible")) return;
-      applyPopover(badge, fetched);
+      applyPopover(badge, fetchedProfile, fetchedGroup);
     })
     .catch(() => {
-      noteProfileCache[noteId] = "";
+      noteProfileCache[noteId] = { odor_profile: "", group_name: "" };
     })
     .finally(() => {
       inFlightEnrichments.delete(noteId);

@@ -27,7 +27,12 @@ from typing import Callable, Iterable
 from urllib.parse import urljoin
 
 from db import get_note_profile, get_note_profiles, upsert_note_profile
-from scraper import FRAGRANTICA_BASE, extract_note_odor_profile, fetch_page
+from scraper import (
+    FRAGRANTICA_BASE,
+    extract_note_group,
+    extract_note_odor_profile,
+    fetch_page,
+)
 
 PYRAMID_LEVELS = ("top_notes", "middle_notes", "base_notes")
 
@@ -82,6 +87,7 @@ def _collect_note_ids(pyramid: dict) -> list[str]:
 
 def _attach_profile(note: dict, profile: dict) -> None:
     note["odor_profile"] = (profile.get("odor_profile") or "") if profile else ""
+    note["group_name"] = (profile.get("group_name") or "") if profile else ""
 
 
 def _fetch_and_cache(
@@ -95,12 +101,15 @@ def _fetch_and_cache(
 
     if not note_id or not note_url:
         note["odor_profile"] = ""
+        note["group_name"] = ""
         return
 
     try:
         html = fetcher(note_url)
         odor_profile = parser(html) or ""
+        group_name = extract_note_group(html) or ""
         note["odor_profile"] = odor_profile
+        note["group_name"] = group_name
         if note.get("note_url") != note_url:
             note["note_url"] = note_url
         upsert_note_profile(
@@ -108,9 +117,11 @@ def _fetch_and_cache(
             note_name=note_name,
             note_url=note_url,
             odor_profile=odor_profile,
+            group_name=group_name,
         )
     except Exception as exc:  # noqa: BLE001 - we want to capture any failure
         note["odor_profile"] = ""
+        note["group_name"] = ""
         note["error"] = str(exc)[:200]
 
 
@@ -144,6 +155,7 @@ def enrich_notes_with_odor_profiles(
             note_id = str(note.get("note_id") or "")
             if not note_id:
                 note["odor_profile"] = ""
+                note["group_name"] = ""
                 continue
 
             profile = cached.get(note_id)
@@ -166,46 +178,49 @@ def enrich_single_note(
     *,
     fetcher: Callable[[str], str] = fetch_page,
     parser: Callable[[str], str] = extract_note_odor_profile,
-) -> str:
-    """Fetch and cache the odor profile for a single note.
+) -> dict:
+    """Fetch and cache the odor profile *and* note group for a note.
 
     Used for lazy, per-note enrichment triggered by the UI on hover. The
-    database cache table is consulted first; only on a miss is the
-    note page fetched. The reconstructed note URL is used as a
-    fallback for older entries whose stored ``pyramid_data`` does not
-    include the original URL.
+    database cache table is consulted first; only on a miss (or when a
+    legacy cached row lacks ``group_name``) is the note page fetched.
 
-    Returns the odor profile string (empty if it could not be obtained).
+    Returns ``{"odor_profile": "...", "group_name": "..."}``.
     """
+    empty = {"odor_profile": "", "group_name": ""}
     note_id = str(note_id or "")
     if not note_id:
-        return ""
+        return empty
 
     cached = get_note_profile(note_id)
     if cached is not None:
-        profile = cached.get("odor_profile") or ""
-        if profile or cached.get("fetched_at"):
-            return profile
+        group_name = cached.get("group_name")
+        if group_name is not None:
+            return {
+                "odor_profile": cached.get("odor_profile") or "",
+                "group_name": group_name or "",
+            }
 
     resolved_url = (note_url or "").strip() or _build_note_url(note_id, note_name or "")
     if not resolved_url:
-        return ""
+        return empty
 
     try:
         html = fetcher(resolved_url)
-        profile = parser(html) or ""
+        odor_profile = parser(html) or ""
+        group_name = extract_note_group(html) or ""
     except Exception:
-        return ""
+        return empty
 
-    if profile:
-        upsert_note_profile(
-            note_id=note_id,
-            note_name=note_name or "",
-            note_url=resolved_url,
-            odor_profile=profile,
-        )
+    upsert_note_profile(
+        note_id=note_id,
+        note_name=note_name or "",
+        note_url=resolved_url,
+        odor_profile=odor_profile,
+        group_name=group_name,
+    )
 
-    return profile
+    return {"odor_profile": odor_profile, "group_name": group_name}
 
 
 def collect_unique_note_ids(pyramids: Iterable[dict]) -> list[str]:

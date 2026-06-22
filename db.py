@@ -239,6 +239,33 @@ def run_migrations() -> None:
                 );
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS note_group (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+            cur.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS note_group_name_lower_unique
+                ON note_group (LOWER(name));
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE fragrantica_note_profiles
+                ADD COLUMN IF NOT EXISTS group_name TEXT;
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE fragrantica_note_profiles
+                ADD COLUMN IF NOT EXISTS note_group_id INT REFERENCES note_group(id);
+                """
+            )
 
 
 def get_or_create_user(keycloak_uuid: str) -> int:
@@ -622,6 +649,42 @@ def delete_from_wishlist(wishlist_id: int, user_id: int) -> bool:
             return cur.rowcount > 0
 
 
+def get_or_create_note_group(name: str) -> tuple[int, str] | tuple[None, None]:
+    """Return (id, name) for a note group, creating it if absent.
+
+    Comparison is case-insensitive: 'Floral' and 'floral' map to the
+    same group. Returns (None, None) when given an empty string.
+    """
+    name = (name or "").strip()
+    if not name:
+        return None, None
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, name FROM note_group WHERE LOWER(name) = LOWER(%s);",
+                (name,),
+            )
+            row = cur.fetchone()
+            if row:
+                return row[0], row[1]
+            cur.execute(
+                "INSERT INTO note_group (name) VALUES (%s) "
+                "ON CONFLICT ((LOWER(name))) DO NOTHING RETURNING id;",
+                (name,),
+            )
+            row = cur.fetchone()
+            if row:
+                return row[0], name
+            cur.execute(
+                "SELECT id, name FROM note_group WHERE LOWER(name) = LOWER(%s);",
+                (name,),
+            )
+            row = cur.fetchone()
+            if row:
+                return row[0], row[1]
+            return None, None
+
+
 def get_note_profile(note_id: str) -> dict | None:
     """Return cached note profile by note_id, or None if not present."""
     if not note_id:
@@ -631,7 +694,7 @@ def get_note_profile(note_id: str) -> dict | None:
             cur.execute(
                 """
                 SELECT note_id, note_name, note_url, odor_profile, source,
-                       fetched_at, updated_at
+                       fetched_at, updated_at, group_name
                 FROM fragrantica_note_profiles
                 WHERE note_id = %s;
                 """,
@@ -650,7 +713,7 @@ def get_note_profiles(note_ids: list[str]) -> dict[str, dict]:
             cur.execute(
                 """
                 SELECT note_id, note_name, note_url, odor_profile, source,
-                       fetched_at, updated_at
+                       fetched_at, updated_at, group_name
                 FROM fragrantica_note_profiles
                 WHERE note_id = ANY(%s);
                 """,
@@ -665,23 +728,38 @@ def upsert_note_profile(
     note_url: str,
     odor_profile: str,
     source: str = "fragrantica",
+    group_name: str = "",
 ) -> None:
-    """Insert or update a cached note profile."""
+    """Insert or update a cached note profile.
+
+    When *group_name* is provided and non-empty, the note is linked to
+    the corresponding ``note_group`` row (created if absent, case-
+    insensitive). An empty string leaves the group link unchanged.
+    """
+    note_group_id = None
+    if group_name and group_name.strip():
+        note_group_id, _ = get_or_create_note_group(group_name)
+
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO fragrantica_note_profiles (
                     note_id, note_name, note_url, odor_profile, source,
-                    fetched_at, updated_at
+                    note_group_id, group_name, fetched_at, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                VALUES (%s, %s, %s, %s, %s, %s, %s,
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON CONFLICT (note_id) DO UPDATE
                 SET note_name = EXCLUDED.note_name,
                     note_url = EXCLUDED.note_url,
                     odor_profile = EXCLUDED.odor_profile,
                     source = EXCLUDED.source,
+                    note_group_id = COALESCE(EXCLUDED.note_group_id,
+                                             fragrantica_note_profiles.note_group_id),
+                    group_name = COALESCE(EXCLUDED.group_name,
+                                          fragrantica_note_profiles.group_name),
                     updated_at = CURRENT_TIMESTAMP;
                 """,
-                (note_id, note_name, note_url, odor_profile, source),
+                (note_id, note_name, note_url, odor_profile, source, note_group_id, group_name),
             )

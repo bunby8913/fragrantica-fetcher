@@ -6,6 +6,7 @@
   const RETURN_TO_KEY = "fragrantica_return_to";
 
   let configPromise = null;
+  let refreshPromise = null;
 
   function randomString(length = 64) {
     const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
@@ -62,7 +63,7 @@
     sessionStorage.removeItem(CODE_VERIFIER_KEY);
   }
 
-  async function refreshAccessToken() {
+  async function performRefresh() {
     const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
     if (!refreshToken) return false;
 
@@ -84,6 +85,14 @@
     return true;
   }
 
+  async function refreshAccessToken() {
+    if (refreshPromise) return refreshPromise;
+    refreshPromise = performRefresh().finally(() => {
+      refreshPromise = null;
+    });
+    return refreshPromise;
+  }
+
   async function ensureToken() {
     if (isTokenUsable()) return true;
     return refreshAccessToken();
@@ -96,7 +105,16 @@
 
   async function authFetch(url, options = {}) {
     const headers = await authHeaders(options.headers || {});
-    const response = await fetch(url, { ...options, headers });
+    let response = await fetch(url, { ...options, headers });
+
+    if (response.status === 401) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        const retryHeaders = await authHeaders(options.headers || {});
+        response = await fetch(url, { ...options, headers: retryHeaders });
+      }
+    }
+
     if (response.status === 401) {
       clearTokens();
       window.location.href = `/login?return_to=${encodeURIComponent(window.location.pathname)}`;

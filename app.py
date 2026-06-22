@@ -418,12 +418,16 @@ def enrich_note_api():
     if not note_id:
         return jsonify({"error": "note_id is required"}), 400
 
-    odor_profile = enrich_single_note(
+    result = enrich_single_note(
         note_id=note_id,
         note_name=note_name,
         note_url=note_url,
     )
-    return jsonify({"note_id": note_id, "odor_profile": odor_profile})
+    return jsonify({
+        "note_id": note_id,
+        "odor_profile": result.get("odor_profile", ""),
+        "group_name": result.get("group_name", ""),
+    })
 
 
 @app.post("/backfill_note_profiles")

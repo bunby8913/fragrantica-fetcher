@@ -233,6 +233,23 @@ def extract_note_odor_profile(html: str) -> str:
     return profile
 
 
+def extract_note_group(html: str) -> str:
+    """Parse a fragrantica note page and return the note group name.
+
+    Looks for the first H3 element whose text (stripped) starts with
+    ``Group: `` and returns the remainder of that text. Returns an
+    empty string if no such H3 is found.
+    """
+    if not html:
+        return ""
+    soup = BeautifulSoup(html, "lxml")
+    for h3 in soup.find_all("h3"):
+        text = h3.get_text(strip=True)
+        if text.lower().startswith("group:"):
+            return text[len("group:"):].strip()
+    return ""
+
+
 def _parse_image_dimensions(img) -> tuple[float, float]:
     if not img:
         return 0, 0
