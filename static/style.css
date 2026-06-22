@@ -2,12 +2,9 @@
   color-scheme: light;
   --bg: #eef1f6;
   --panel: rgba(255, 255, 255, 0.74);
-  --panel-solid: #f8f9fc;
   --text: #171927;
   --muted: #6f7484;
-  --line: rgba(42, 48, 68, 0.12);
   --accent: #7657ff;
-  --accent-2: #ff6a88;
   --shadow-light: rgba(255, 255, 255, 0.96);
   --shadow-dark: rgba(95, 102, 121, 0.24);
 }
@@ -45,7 +42,7 @@ body {
 .hero {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: end;
   gap: 16px;
   margin-bottom: 26px;
 }
@@ -134,7 +131,7 @@ p {
 .search-field {
   position: relative;
   display: block;
-  min-width: min(360px, 42vw);
+  min-width: min(420px, 42vw);
   color: var(--muted);
   font-size: 0.75rem;
   font-weight: 850;
@@ -172,6 +169,45 @@ p {
 
 .search-field input:focus {
   box-shadow: 0 0 0 3px rgba(118, 87, 255, 0.16), 0 0 1px 0 rgba(255, 255, 255, 0.84);
+}
+
+.search-add-button {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  border: 0;
+  border-radius: 14px;
+  padding: 0 18px;
+  transform: translateY(-50%);
+  background: linear-gradient(135deg, var(--accent), #9f75ff);
+  color: white;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 850;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.search-add-button[hidden] {
+  display: none;
+}
+
+.search-add-button:hover:not(:disabled) {
+  transform: translateY(calc(-50% - 2px));
+  box-shadow: 12px 12px 24px rgba(95, 102, 121, 0.26), -12px -12px 24px rgba(255, 255, 255, 0.9);
+}
+
+.search-add-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.search-field input.has-add-button {
+  padding-right: 80px;
 }
 
 .table-toolbar h2 {
@@ -605,21 +641,6 @@ td {
   font-style: italic;
 }
 
-.note-popover-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 2px;
-  color: var(--accent);
-  font-size: 0.85rem;
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.note-popover-link:hover {
-  text-decoration: underline;
-}
-
 .muted-text {
   color: var(--muted);
 }
@@ -667,7 +688,6 @@ td {
 
 .note-input:disabled,
 .note-size-select:disabled,
-.size-select:disabled,
 .rating-stars.saving,
 .rating-stars.disabled,
 .edit-button:disabled,
@@ -676,30 +696,6 @@ td {
 .add-form input:read-only {
   cursor: wait;
   opacity: 0.62;
-}
-
-.size-select {
-  width: 130px;
-  min-height: 40px;
-  border: 0;
-  border-radius: 14px;
-  padding: 0 12px;
-  background: var(--panel-solid);
-  box-shadow: 5px 5px 12px rgba(95, 102, 121, 0.14), -5px -5px 12px rgba(255, 255, 255, 0.85);
-  color: var(--text);
-  cursor: pointer;
-  font: inherit;
-  outline: none;
-}
-
-.size-select:focus {
-  box-shadow: 5px 5px 12px rgba(95, 102, 121, 0.14), -5px -5px 12px rgba(255, 255, 255, 0.85), 0 0 0 3px rgba(118, 87, 255, 0.16);
-}
-
-.creation-cell {
-  font-size: 0.9rem;
-  color: var(--muted);
-  white-space: nowrap;
 }
 
 .action-link {
@@ -734,7 +730,8 @@ td {
 
 .action-link:focus-visible,
 .edit-button:focus-visible,
-.delete-button:focus-visible {
+.delete-button:focus-visible,
+.search-add-button:focus-visible {
   outline: 3px solid rgba(118, 87, 255, 0.2);
   outline-offset: 2px;
 }

@@ -22,7 +22,6 @@ from db import (
     delete_perfume,
     get_all_perfumes,
     get_archived_perfumes,
-    get_note_profile,
     get_or_create_user,
     get_wishlist,
     move_to_library,
@@ -38,7 +37,6 @@ from enricher import (
     collect_unique_note_ids,
     enrich_notes_with_odor_profiles,
     enrich_single_note,
-    missing_note_ids,
 )
 from scraper import extract_perfume_data, fetch_page
 
@@ -209,7 +207,7 @@ def add_perfume_api():
 
     try:
         html = fetch_page(url)
-        data = extract_perfume_data(html, url)
+        data = extract_perfume_data(html)
     except Exception as exc:
         return jsonify({"error": f"Failed to fetch perfume data: {exc}"}), 502
 
@@ -250,7 +248,7 @@ def add_to_wishlist_api():
 
     try:
         html = fetch_page(url)
-        data = extract_perfume_data(html, url)
+        data = extract_perfume_data(html)
     except Exception as exc:
         return jsonify({"error": f"Failed to fetch perfume data: {exc}"}), 502
 
@@ -409,15 +407,6 @@ def delete_wishlist_item_api(wishlist_id: int):
     return jsonify({"success": True})
 
 
-@app.get("/note_profile/<note_id>")
-@require_auth
-def get_note_profile_api(note_id: str):
-    profile = get_note_profile(note_id)
-    if not profile:
-        return jsonify({"note_id": note_id, "odor_profile": ""}), 200
-    return jsonify(_json_ready(profile))
-
-
 @app.post("/enrich_note")
 @require_auth
 def enrich_note_api():
@@ -435,14 +424,6 @@ def enrich_note_api():
         note_url=note_url,
     )
     return jsonify({"note_id": note_id, "odor_profile": odor_profile})
-
-
-@app.get("/note_profiles/missing")
-@require_auth
-def get_missing_note_ids_api():
-    user_id = _get_user_id()
-    pyramids = _all_user_pyramids(user_id)
-    return jsonify({"missing": missing_note_ids(pyramids)})
 
 
 @app.post("/backfill_note_profiles")

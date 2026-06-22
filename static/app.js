@@ -10,6 +10,10 @@ const tableWrap = document.querySelector(".table-wrap");
 const tableHeaders = document.querySelectorAll("thead th");
 const sortableHeaders = document.querySelectorAll("th.sortable");
 const logoutLink = document.querySelector("#logout-link");
+const searchIcon = document.querySelector("#search-icon");
+const searchAddButton = document.querySelector("#search-add-button");
+const searchIconUrl = searchIcon ? searchIcon.getAttribute("src") : "";
+const addIconUrl = searchIconUrl ? searchIconUrl.replace(/search\.svg$/i, "plus-circle.svg") : "";
 const currentPage = typeof PAGE === "string" ? PAGE : document.body.dataset.page || "library";
 const isWishlistPage = currentPage === "wishlist";
 const isArchivePage = currentPage === "archive";
@@ -38,7 +42,7 @@ const sizeLabels = {
 
 let allPerfumes = [];
 let currentSort = { column: "creation_date", direction: "desc" };
-let currentSearch = "";
+let currentSearch = { prefix: "all", term: "" };
 let editingPerfumeId = null;
 let editingBackup = null;
 const columnWidthsStorageKey = `fragrantica-column-widths-${currentPage}`;
@@ -245,18 +249,28 @@ function isValidFragranticaUrl(value) {
 }
 
 function filteredPerfumes() {
-  const search = currentSearch.trim().toLowerCase();
+  const { prefix, term } = currentSearch;
+  const search = term.trim().toLowerCase();
   if (!search) return allPerfumes;
 
   return allPerfumes.filter((perfume) => {
-    const haystack = [
-      perfume.name || "",
-      perfume.brand || "",
-      stripHtml(perfume.description || ""),
-      pyramidSearchText(perfume.pyramid_data),
-    ]
-      .join(" ")
-      .toLowerCase();
+    let haystack;
+    if (prefix === "name") {
+      haystack = (perfume.name || "").toLowerCase();
+    } else if (prefix === "brand") {
+      haystack = (perfume.brand || "").toLowerCase();
+    } else if (prefix === "note") {
+      haystack = pyramidSearchText(perfume.pyramid_data);
+    } else {
+      haystack = [
+        perfume.name || "",
+        perfume.brand || "",
+        stripHtml(perfume.description || ""),
+        pyramidSearchText(perfume.pyramid_data),
+      ]
+        .join(" ")
+        .toLowerCase();
+    }
 
     return haystack.includes(search);
   });
@@ -996,8 +1010,6 @@ document.addEventListener("keydown", (event) => {
 });
 
 document.addEventListener("click", (event) => {
-  const link = event.target.closest(".note-popover-link");
-  if (link) return;
   const badge = event.target.closest(".note-badge");
   if (!badge) return;
   const noteUrl = badge.dataset.noteUrl || "";
@@ -1019,40 +1031,18 @@ async function loadPerfumes() {
   }
 }
 
-searchInput.addEventListener("input", () => {
-  currentSearch = searchInput.value;
-  renderPerfumes();
-});
-
-tableToolbar.addEventListener("click", (event) => {
-  if (searchField.contains(event.target)) return;
-  currentSort = { column: "creation_date", direction: "desc" };
-  renderPerfumes();
-});
-
-sortableHeaders.forEach((header) => {
-  header.addEventListener("click", () => {
-    const column = header.dataset.sort;
-    const direction = currentSort.column === column && currentSort.direction === "asc" ? "desc" : "asc";
-    currentSort = { column, direction };
-    renderPerfumes();
-  });
-});
-
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-
-  const urls = sanitizeUrlInput(urlInput.value);
-  const invalidUrls = urls.filter((url) => !isValidFragranticaUrl(url));
+async function submitUrls(rawValue, { trigger, input, onReset }) {
+  const urls = sanitizeUrlInput(rawValue);
   if (!urls.length) return;
+
+  const invalidUrls = urls.filter((url) => !isValidFragranticaUrl(url));
   if (invalidUrls.length) {
     setStatus("Every URL must be a fragrantica.com perfume page.", true);
     return;
   }
 
-  const button = form.querySelector("button");
-  button.disabled = true;
-  urlInput.readOnly = true;
+  trigger.disabled = true;
+  if (input) input.readOnly = true;
 
   const added = [];
   const failures = [];
@@ -1083,7 +1073,7 @@ form.addEventListener("submit", async (event) => {
       }
     }
 
-    if (added.length) form.reset();
+    if (added.length && onReset) onReset();
 
     if (failures.length) {
       setStatus(`Added ${added.length}/${urls.length}. ${failures.length} failed: ${failures[0].message}`, true);
@@ -1093,10 +1083,87 @@ form.addEventListener("submit", async (event) => {
       setStatus(`Added ${added.length} ${isWishlistPage ? "wishlist items" : "perfumes"}.`);
     }
   } finally {
-    urlInput.readOnly = false;
-    button.disabled = false;
+    if (input) input.readOnly = false;
+    trigger.disabled = false;
   }
+}
+
+function isAddUrlMode(value) {
+  return /^\s*https?:\/\//i.test(value);
+}
+
+function parseSearchQuery(value) {
+  if (isAddUrlMode(value)) return { prefix: "add", term: "" };
+
+  const match = /^\s*#(name|brand|note)\s+([\s\S]*\S)\s*$/i.exec(value);
+  if (match) return { prefix: match[1].toLowerCase(), term: match[2] };
+
+  return { prefix: "all", term: value };
+}
+
+function updateSearchMode() {
+  const value = searchInput.value;
+  const query = parseSearchQuery(value);
+  const addMode = query.prefix === "add";
+
+  if (searchIcon) searchIcon.src = addMode ? addIconUrl : searchIconUrl;
+  if (searchAddButton) searchAddButton.hidden = !addMode;
+  searchInput.classList.toggle("has-add-button", addMode);
+
+  currentSearch = addMode ? { prefix: "all", term: "" } : query;
+  renderPerfumes();
+}
+
+function resetSearchInput() {
+  searchInput.value = "";
+  updateSearchMode();
+}
+
+searchInput.addEventListener("input", updateSearchMode);
+
+searchInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  if (!isAddUrlMode(searchInput.value)) return;
+  event.preventDefault();
+  if (searchAddButton) searchAddButton.click();
 });
+
+if (searchAddButton) {
+  searchAddButton.addEventListener("click", () => {
+    submitUrls(searchInput.value, {
+      trigger: searchAddButton,
+      input: searchInput,
+      onReset: resetSearchInput,
+    });
+  });
+}
+
+tableToolbar.addEventListener("click", (event) => {
+  if (searchField.contains(event.target)) return;
+  currentSort = { column: "creation_date", direction: "desc" };
+  renderPerfumes();
+});
+
+sortableHeaders.forEach((header) => {
+  header.addEventListener("click", () => {
+    const column = header.dataset.sort;
+    const direction = currentSort.column === column && currentSort.direction === "asc" ? "desc" : "asc";
+    currentSort = { column, direction };
+    renderPerfumes();
+  });
+});
+
+// DEPRECATED: The dedicated add-perfume form has been superseded by the search bar's
+// URL-add mode. The form markup is commented out in templates/index.html. To re-enable,
+// uncomment the block below and restore the form in the template.
+// form.addEventListener("submit", async (event) => {
+//   event.preventDefault();
+//   submitUrls(urlInput.value, {
+//     trigger: form.querySelector("button"),
+//     input: urlInput,
+//     onReset: () => form.reset(),
+//   });
+// });
 
 initializeColumnResize();
 

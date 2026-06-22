@@ -28,27 +28,20 @@ def fetch_page(url: str) -> str:
     return resp.text
 
 
-def extract_perfume_data(html: str, url: str) -> dict:
+def extract_perfume_data(html: str) -> dict:
     """Extract all perfume data from the HTML."""
     soup = BeautifulSoup(html, "lxml")
 
     brand = _extract_brand(soup)
     name = _extract_name(soup, brand)
-    rating_value = _extract_rating_value(soup)
-    rating_count = _extract_rating_count(soup)
     accords = _extract_accords(soup)
     pyramid = _extract_pyramid(soup)
-    perfume_id = _extract_id(url)
 
     return {
-        "id": perfume_id,
         "name": name,
         "brand": brand,
-        "rating_value": rating_value,
-        "rating_count": rating_count,
         "main_accords": accords,
         "pyramid": pyramid,
-        "source_url": url,
     }
 
 
@@ -69,18 +62,6 @@ def _extract_name(soup: BeautifulSoup, brand: str = "") -> str:
 def _extract_brand(soup: BeautifulSoup) -> str:
     el = soup.select_one('[itemprop="brand"] [itemprop="name"]')
     return el.get_text(strip=True) if el else ""
-
-
-def _extract_rating_value(soup: BeautifulSoup) -> str:
-    el = soup.select_one('[itemprop="ratingValue"]')
-    return el.get_text(strip=True) if el else ""
-
-
-def _extract_rating_count(soup: BeautifulSoup) -> str:
-    el = soup.select_one('[itemprop="ratingCount"]')
-    if not el:
-        return ""
-    return el.get("content", el.get_text(strip=True))
 
 
 def _extract_accords(soup: BeautifulSoup) -> list:
@@ -293,11 +274,6 @@ def _note_image_area(note: dict) -> float:
     return width or height
 
 
-def _extract_id(url: str) -> str:
-    match = re.search(r"-(\d+)\.html$", url)
-    return match.group(1) if match else ""
-
-
 def format_pyramid_text(pyramid: dict) -> str:
     """Format pyramid data as a single text line grouped by level."""
     parts = []
@@ -340,7 +316,7 @@ def main():
     html = fetch_page(url)
 
     print("Parsing perfume data...", file=sys.stderr)
-    data = extract_perfume_data(html, url)
+    data = extract_perfume_data(html)
 
     if not data["name"]:
         print("Error: could not extract perfume name", file=sys.stderr)

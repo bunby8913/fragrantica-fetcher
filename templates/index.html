@@ -12,6 +12,9 @@
   <body data-page="{{ page }}">
     <main class="shell">
       <section class="hero">
+        <!-- DEPRECATED: The dedicated add-perfume form has been superseded by the search bar's
+             URL-add mode. Preserved here for reference; re-enable by removing this comment. -->
+        <!--
         <form id="add-perfume-form" class="add-form">
           <input
             id="perfume-url"
@@ -24,6 +27,7 @@
           >
           <button type="submit">{{ 'Add to Wishlist' if page == 'wishlist' else 'Add Perfume' }}</button>
         </form>
+        -->
         <div class="nav-group">
           <nav class="page-nav" aria-label="Page navigation">
             <a class="{{ 'active' if page == 'library' else '' }}" href="/">Library</a>
@@ -42,8 +46,9 @@
           </div>
           <label class="search-field">
             <span class="visually-hidden">Search</span>
-            <img class="search-icon" src="{{ url_for('assets', filename='Icons/search.svg') }}" alt="" aria-hidden="true">
-            <input id="table-search" type="search" placeholder="Search by name, brand, or notes..." autocomplete="off">
+            <img id="search-icon" class="search-icon" src="{{ url_for('assets', filename='Icons/search.svg') }}" alt="" aria-hidden="true">
+            <input id="table-search" type="search" placeholder="Add URLs or search by name, brand and notes." autocomplete="off">
+            <button id="search-add-button" type="button" class="search-add-button" hidden>Add</button>
           </label>
         </div>
 
