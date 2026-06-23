@@ -1,9 +1,13 @@
 import os
 from contextlib import contextmanager
+from pathlib import Path
 
 import psycopg2
 from psycopg2 import errors
 from psycopg2.extras import RealDictCursor
+
+
+MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 
 
 def _database_url() -> str:
@@ -28,6 +32,14 @@ def get_connection():
         raise
     finally:
         conn.close()
+
+
+def _run_sql_migrations(cur) -> None:
+    """Run idempotent SQL migration files in lexical order."""
+    if not MIGRATIONS_DIR.exists():
+        return
+    for migration in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        cur.execute(migration.read_text(encoding="utf-8"))
 
 
 def run_migrations() -> None:
@@ -180,6 +192,19 @@ def run_migrations() -> None:
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS wishlist (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR NOT NULL,
+                    brand VARCHAR NOT NULL,
+                    pyramid_data TEXT,
+                    creation_date DATE DEFAULT CURRENT_DATE,
+                    original_address VARCHAR,
+                    user_id INT
+                );
+                """
+            )
+            cur.execute(
+                """
                 ALTER TABLE wishlist
                 ADD COLUMN IF NOT EXISTS user_id INT;
                 """
@@ -266,6 +291,7 @@ def run_migrations() -> None:
                 ADD COLUMN IF NOT EXISTS note_group_id INT REFERENCES note_group(id);
                 """
             )
+            _run_sql_migrations(cur)
 
 
 def get_or_create_user(keycloak_uuid: str) -> int:

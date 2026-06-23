@@ -942,7 +942,7 @@ function showNotePopover(badge) {
 
   if (profile || group) {
     applyPopover(badge, profile, group);
-    return;
+    if (group) return;
   }
 
   if (noteId && Object.prototype.hasOwnProperty.call(noteProfileCache, noteId)) {
@@ -955,11 +955,13 @@ function showNotePopover(badge) {
     return;
   }
 
-  const popover = getNotePopover();
-  popover.innerHTML = renderNotePopoverContent(name, "", "", badge.dataset.noteImage || "", "");
-  popover.classList.add("visible");
-  popover.setAttribute("aria-hidden", "false");
-  positionNotePopover(badge, popover);
+  if (!profile) {
+    const popover = getNotePopover();
+    popover.innerHTML = renderNotePopoverContent(name, "", "", badge.dataset.noteImage || "", "");
+    popover.classList.add("visible");
+    popover.setAttribute("aria-hidden", "false");
+    positionNotePopover(badge, popover);
+  }
 
   if (!noteId || inFlightEnrichments.has(noteId)) return;
 
@@ -977,16 +979,17 @@ function showNotePopover(badge) {
     .then(({ ok, data }) => {
       const fetchedProfile = ok && data && typeof data.odor_profile === "string" ? data.odor_profile : "";
       const fetchedGroup = ok && data && typeof data.group_name === "string" ? data.group_name : "";
-      noteProfileCache[noteId] = { odor_profile: fetchedProfile, group_name: fetchedGroup };
-      badge.dataset.odorProfile = fetchedProfile;
+      const nextProfile = fetchedProfile || profile;
+      noteProfileCache[noteId] = { odor_profile: nextProfile, group_name: fetchedGroup };
+      badge.dataset.odorProfile = nextProfile;
       badge.dataset.noteGroup = fetchedGroup;
       if (!document.body.contains(badge)) return;
       const popoverEl = document.getElementById("note-popover");
       if (!popoverEl || !popoverEl.classList.contains("visible")) return;
-      applyPopover(badge, fetchedProfile, fetchedGroup);
+      applyPopover(badge, nextProfile, fetchedGroup);
     })
     .catch(() => {
-      noteProfileCache[noteId] = { odor_profile: "", group_name: "" };
+      noteProfileCache[noteId] = { odor_profile: profile, group_name: "" };
     })
     .finally(() => {
       inFlightEnrichments.delete(noteId);

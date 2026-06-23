@@ -160,8 +160,10 @@ def enrich_notes_with_odor_profiles(
 
             profile = cached.get(note_id)
             if profile is not None:
+                if profile.get("group_name") is not None:
+                    _attach_profile(note, profile)
+                    continue
                 _attach_profile(note, profile)
-                continue
 
             if made_request and rate_limit_seconds > 0:
                 sleep_fn(rate_limit_seconds)
@@ -256,7 +258,7 @@ def backfill_note_profiles(
     """Fetch and cache any missing note profiles for the given pyramids.
 
     Returns the number of note profiles newly inserted/updated. Notes
-    already cached (and having an ``odor_profile``) are skipped. The
+    already cached with a known ``group_name`` are skipped. The
     backfill is no longer auto-invoked from the page-load path; it is
     exposed as a manual endpoint for users who want to pre-warm the
     cache for all of their stored perfumes.
@@ -272,7 +274,8 @@ def backfill_note_profiles(
         for level in PYRAMID_LEVELS:
             for note in pyramid.get(level, []) or []:
                 note_id = str(note.get("note_id") or "")
-                if note_id and note_id not in cached:
+                profile = cached.get(note_id)
+                if note_id and (profile is None or profile.get("group_name") is None):
                     target_notes.append(note)
 
     added = 0
@@ -280,8 +283,12 @@ def backfill_note_profiles(
         if index and rate_limit_seconds > 0:
             sleep_fn(rate_limit_seconds)
         before = note.get("odor_profile", "__missing__")
+        before_group = note.get("group_name", "__missing__")
         _fetch_and_cache(note, fetcher, parser)
-        if note.get("odor_profile") and note.get("odor_profile") != before:
+        if (
+            (note.get("odor_profile") and note.get("odor_profile") != before)
+            or (note.get("group_name") and note.get("group_name") != before_group)
+        ):
             added += 1
 
     return added

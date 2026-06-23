@@ -44,6 +44,7 @@ from scraper import extract_perfume_data, fetch_page
 load_dotenv()
 
 app = Flask(__name__)
+_MIGRATIONS_RAN = False
 
 
 def _json_ready(row: dict) -> dict:
@@ -441,10 +442,16 @@ def backfill_note_profiles_api():
 
 
 def create_app() -> Flask:
-    run_migrations()
+    global _MIGRATIONS_RAN
+    if not _MIGRATIONS_RAN:
+        run_migrations()
+        _MIGRATIONS_RAN = True
     return app
+
+
+create_app()
 
 
 if __name__ == "__main__":
     debug = os.getenv("FLASK_DEBUG", "").lower() in {"1", "true", "yes", "on"}
-    create_app().run(host="0.0.0.0", port=5000, debug=debug)
+    app.run(host="0.0.0.0", port=5000, debug=debug)
