@@ -128,6 +128,45 @@ p {
   cursor: pointer;
 }
 
+.table-toolbar-actions {
+  display: inline-flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.add-empty-entry {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 16px;
+  padding: 0 18px;
+  background: linear-gradient(135deg, var(--accent), #9f75ff);
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 850;
+  transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+}
+
+.add-empty-entry:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 12px 12px 24px rgba(95, 102, 121, 0.26), -12px -12px 24px rgba(255, 255, 255, 0.9);
+}
+
+.add-empty-entry:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.add-empty-entry:focus-visible {
+  outline: 3px solid rgba(118, 87, 255, 0.2);
+  outline-offset: 2px;
+}
+
 .search-field {
   position: relative;
   display: block;
@@ -283,6 +322,52 @@ p {
 .confirm-dialog-actions button:hover,
 .confirm-dialog-actions button:focus-visible {
   transform: translateY(-1px);
+}
+
+.link-dialog-form {
+  display: block;
+  margin-top: 18px;
+}
+
+.link-dialog-input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(42, 48, 68, 0.12);
+  border-radius: 14px;
+  padding: 0 16px;
+  background: rgba(237, 240, 246, 0.88);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.96rem;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.link-dialog-input:focus {
+  border-color: rgba(118, 87, 255, 0.32);
+  box-shadow: 0 0 0 3px rgba(118, 87, 255, 0.16);
+}
+
+.link-dialog-confirm-button {
+  background: linear-gradient(135deg, var(--accent), #9f75ff);
+  color: #ffffff;
+  box-shadow: 9px 9px 20px rgba(95, 102, 121, 0.24), -9px -9px 20px rgba(255, 255, 255, 0.82);
+}
+
+.link-dialog-confirm-button:hover,
+.link-dialog-confirm-button:focus-visible {
+  box-shadow: 12px 12px 24px rgba(95, 102, 121, 0.26), -12px -12px 24px rgba(255, 255, 255, 0.9);
+}
+
+.action-link-button {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.action-link-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
 
 .confirm-cancel-button {
@@ -894,6 +979,49 @@ td {
 
 body[data-page="wishlist"] .action-cell {
   min-width: 244px;
+}
+
+.rescrape-button {
+  display: inline-flex;
+  width: 32px;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  background: transparent;
+  color: #8b8f99;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0;
+  font-weight: 800;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.rescrape-button::before {
+  width: 18px;
+  height: 18px;
+  background: currentColor;
+  content: "";
+  mask: url("../assets/Icons/refresh-cw.svg") center / contain no-repeat;
+  -webkit-mask: url("../assets/Icons/refresh-cw.svg") center / contain no-repeat;
+}
+
+.rescrape-button:hover:not(:disabled) {
+  background: rgba(42, 48, 68, 0.06);
+  color: #606570;
+  transform: translateY(-1px);
+}
+
+.rescrape-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.rescrape-button:focus-visible {
+  outline: 3px solid rgba(118, 87, 255, 0.2);
+  outline-offset: 2px;
 }
 
 .move-button {

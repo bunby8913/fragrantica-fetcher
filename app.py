@@ -18,6 +18,8 @@ from db import (
     DuplicatePerfumeError,
     add_perfume,
     add_to_wishlist,
+    create_empty_perfume,
+    create_empty_wishlist_item,
     delete_from_wishlist,
     delete_perfume,
     get_all_perfumes,
@@ -27,10 +29,12 @@ from db import (
     move_to_library,
     run_migrations,
     update_perfume_details,
+    update_perfume_link,
     update_rating,
     update_note,
     update_size,
     update_wishlist_details,
+    update_wishlist_link,
 )
 from enricher import (
     backfill_note_profiles,
@@ -65,6 +69,11 @@ def _is_valid_fragrantica_url(url: str) -> bool:
         and (hostname == "fragrantica.com" or hostname.endswith(".fragrantica.com"))
         and "/perfume/" in parsed.path
     )
+
+
+def _is_valid_http_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 def _get_user_id() -> int:
@@ -279,6 +288,52 @@ def add_to_wishlist_api():
     return jsonify(_json_ready(row)), 201
 
 
+@app.post("/perfume/empty")
+@require_auth
+def add_empty_perfume_api():
+    user_id = _get_user_id()
+    row = create_empty_perfume(user_id)
+    return jsonify(_json_ready(row)), 201
+
+
+@app.post("/wishlist/empty")
+@require_auth
+def add_empty_wishlist_item_api():
+    user_id = _get_user_id()
+    row = create_empty_wishlist_item(user_id)
+    return jsonify(_json_ready(row)), 201
+
+
+@app.put("/perfume/<int:perfume_id>/link")
+@require_auth
+def update_perfume_link_api(perfume_id: int):
+    payload = request.get_json(silent=True) or {}
+    url = str(payload.get("url", "")).strip()
+    if not _is_valid_http_url(url):
+        return jsonify({"error": "URL must start with http:// or https://"}), 400
+
+    user_id = _get_user_id()
+    row = update_perfume_link(perfume_id, url, user_id)
+    if not row:
+        return jsonify({"error": "Perfume not found"}), 404
+    return jsonify(_json_ready(row))
+
+
+@app.put("/wishlist/<int:wishlist_id>/link")
+@require_auth
+def update_wishlist_link_api(wishlist_id: int):
+    payload = request.get_json(silent=True) or {}
+    url = str(payload.get("url", "")).strip()
+    if not _is_valid_http_url(url):
+        return jsonify({"error": "URL must start with http:// or https://"}), 400
+
+    user_id = _get_user_id()
+    row = update_wishlist_link(wishlist_id, url, user_id)
+    if not row:
+        return jsonify({"error": "Wishlist item not found"}), 404
+    return jsonify(_json_ready(row))
+
+
 @app.put("/perfume/<int:perfume_id>/rating")
 @require_auth
 def update_rating_api(perfume_id: int):
@@ -439,6 +494,144 @@ def backfill_note_profiles_api():
     note_ids = collect_unique_note_ids(pyramids)
     added = backfill_note_profiles(pyramids)
     return jsonify({"checked": len(note_ids), "added": added})
+
+
+PYRAMID_LEVELS = ("top_notes", "middle_notes", "base_notes")
+
+
+def _merge_pyramid_with_fresh(existing_pyramid: dict, fresh_pyramid: dict) -> dict:
+    """Merge fresh note metadata (note_id, image_url, etc.) into the user's existing notes.
+
+    The user's note order and any custom (non-Fragrantica) names are preserved. Notes
+    present in the fresh scrape that the user does not yet have are appended to the
+    end of the matching level, then to base_notes as a last resort.
+    """
+    merged = {
+        "top_notes": [],
+        "middle_notes": [],
+        "base_notes": [],
+    }
+
+    for level in PYRAMID_LEVELS:
+        existing_notes = list(existing_pyramid.get(level, []) or []) if existing_pyramid else []
+        fresh_notes = list(fresh_pyramid.get(level, []) or []) if fresh_pyramid else []
+
+        fresh_lookup = {}
+        for fresh in fresh_notes:
+            name = (fresh.get("name") or "").strip().lower()
+            if name and name not in fresh_lookup:
+                fresh_lookup[name] = fresh
+
+        used_fresh_keys: set[str] = set()
+        for note in existing_notes:
+            name = (note.get("name") or "").strip()
+            if not name:
+                continue
+            key = name.lower()
+            fresh = fresh_lookup.get(key)
+            if fresh and isinstance(fresh, dict):
+                merged[level].append({**fresh, "name": name})
+                used_fresh_keys.add(key)
+            else:
+                merged[level].append({"name": name})
+
+        for fresh in fresh_notes:
+            name = (fresh.get("name") or "").strip()
+            key = name.lower()
+            if not name or key in used_fresh_keys:
+                continue
+            merged[level].append(fresh)
+
+    return merged
+
+
+def _rescrape_entry(row: dict, scraper_url: str):
+    """Re-scrape ``scraper_url`` and merge fresh note metadata into the row's pyramid.
+
+    Returns ``(status, body)`` where status is an HTTP-like code and body is a JSON-ready
+    dict. The caller is responsible for the actual DB write.
+    """
+    try:
+        html = fetch_page(scraper_url)
+        data = extract_perfume_data(html)
+    except Exception as exc:
+        return 502, {"error": f"Failed to fetch perfume data: {exc}"}
+
+    existing_pyramid = _parse_pyramid_data(row.get("pyramid_data"))
+    fresh_pyramid = data.get("pyramid", {}) or {}
+    merged = _merge_pyramid_with_fresh(existing_pyramid, fresh_pyramid)
+
+    try:
+        enrich_notes_with_odor_profiles(merged)
+    except Exception:
+        for level in PYRAMID_LEVELS:
+            for note in merged.get(level, []) or []:
+                note.setdefault("odor_profile", "")
+                note.setdefault("group_name", "")
+
+    return 200, {
+        "name": (row.get("name") or data.get("name") or "").strip(),
+        "brand": (row.get("brand") or data.get("brand") or "").strip(),
+        "pyramid_data": json.dumps(merged, ensure_ascii=False),
+    }
+
+
+@app.post("/perfume/<int:perfume_id>/rescrape")
+@require_auth
+def rescrape_perfume_api(perfume_id: int):
+    user_id = _get_user_id()
+    existing_rows = get_all_perfumes(user_id)
+    row = next((r for r in existing_rows if r["id"] == perfume_id), None)
+    if not row:
+        return jsonify({"error": "Perfume not found"}), 404
+
+    scraper_url = (row.get("original_address") or "").strip()
+    if not scraper_url or not _is_valid_fragrantica_url(scraper_url):
+        return jsonify({"error": "A valid Fragrantica link is required to rescrape"}), 400
+
+    status, body = _rescrape_entry(row, scraper_url)
+    if status != 200:
+        return jsonify(body), status
+
+    updated = update_perfume_details(
+        perfume_id=perfume_id,
+        name=body["name"],
+        brand=body["brand"],
+        pyramid_data=body["pyramid_data"],
+        user_id=user_id,
+    )
+    if not updated:
+        return jsonify({"error": "Perfume not found"}), 404
+    return jsonify(_json_ready(updated))
+
+
+@app.post("/wishlist/<int:wishlist_id>/rescrape")
+@require_auth
+def rescrape_wishlist_item_api(wishlist_id: int):
+    user_id = _get_user_id()
+    existing_rows = get_wishlist(user_id)
+    row = next((r for r in existing_rows if r["id"] == wishlist_id), None)
+    if not row:
+        return jsonify({"error": "Wishlist item not found"}), 404
+
+    scraper_url = (row.get("original_address") or "").strip()
+    if not scraper_url or not _is_valid_fragrantica_url(scraper_url):
+        return jsonify({"error": "A valid Fragrantica link is required to rescrape"}), 400
+
+    status, body = _rescrape_entry(row, scraper_url)
+    if status != 200:
+        return jsonify(body), status
+
+    updated = update_wishlist_details(
+        wishlist_id=wishlist_id,
+        name=body["name"],
+        brand=body["brand"],
+        pyramid_data=body["pyramid_data"],
+        user_id=user_id,
+    )
+    if not updated:
+        return jsonify({"error": "Wishlist item not found"}), 404
+    return jsonify(_json_ready(updated))
 
 
 def create_app() -> Flask:

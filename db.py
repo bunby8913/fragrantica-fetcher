@@ -1,3 +1,4 @@
+import json
 import os
 from contextlib import contextmanager
 from pathlib import Path
@@ -19,6 +20,12 @@ def _database_url() -> str:
 
 class DuplicatePerfumeError(Exception):
     pass
+
+
+EMPTY_PYRAMID = json.dumps(
+    {"top_notes": [], "middle_notes": [], "base_notes": []},
+    ensure_ascii=False,
+)
 
 
 @contextmanager
@@ -152,16 +159,19 @@ def run_migrations() -> None:
                 CREATE OR REPLACE FUNCTION prevent_duplicate_perfume_insert()
                 RETURNS trigger AS $$
                 BEGIN
-                    PERFORM pg_advisory_xact_lock(hashtext(NEW.name), hashtext(NEW.brand));
+                    IF NEW.name IS NOT NULL AND NEW.name <> '' AND
+                       NEW.brand IS NOT NULL AND NEW.brand <> '' THEN
+                        PERFORM pg_advisory_xact_lock(hashtext(NEW.name), hashtext(NEW.brand));
 
-                    IF EXISTS (
-                        SELECT 1
-                        FROM perfume
-                        WHERE name = NEW.name
-                          AND brand = NEW.brand
-                    ) THEN
-                        RAISE EXCEPTION 'Perfume already exists: % by %', NEW.name, NEW.brand
-                            USING ERRCODE = 'unique_violation';
+                        IF EXISTS (
+                            SELECT 1
+                            FROM perfume
+                            WHERE name = NEW.name
+                              AND brand = NEW.brand
+                        ) THEN
+                            RAISE EXCEPTION 'Perfume already exists: % by %', NEW.name, NEW.brand
+                                USING ERRCODE = 'unique_violation';
+                        END IF;
                     END IF;
 
                     RETURN NEW;
@@ -227,16 +237,19 @@ def run_migrations() -> None:
                 CREATE OR REPLACE FUNCTION prevent_duplicate_wishlist_insert()
                 RETURNS trigger AS $$
                 BEGIN
-                    PERFORM pg_advisory_xact_lock(hashtext(NEW.name), hashtext(NEW.brand));
+                    IF NEW.name IS NOT NULL AND NEW.name <> '' AND
+                       NEW.brand IS NOT NULL AND NEW.brand <> '' THEN
+                        PERFORM pg_advisory_xact_lock(hashtext(NEW.name), hashtext(NEW.brand));
 
-                    IF EXISTS (
-                        SELECT 1
-                        FROM wishlist
-                        WHERE name = NEW.name
-                          AND brand = NEW.brand
-                    ) THEN
-                        RAISE EXCEPTION 'Wishlist perfume already exists: % by %', NEW.name, NEW.brand
-                            USING ERRCODE = 'unique_violation';
+                        IF EXISTS (
+                            SELECT 1
+                            FROM wishlist
+                            WHERE name = NEW.name
+                              AND brand = NEW.brand
+                        ) THEN
+                            RAISE EXCEPTION 'Wishlist perfume already exists: % by %', NEW.name, NEW.brand
+                                USING ERRCODE = 'unique_violation';
+                        END IF;
                     END IF;
 
                     RETURN NEW;
@@ -352,6 +365,110 @@ def add_perfume(
                 return dict(cur.fetchone())
     except errors.UniqueViolation as exc:
         raise DuplicatePerfumeError from exc
+
+
+def create_empty_perfume(user_id: int) -> dict:
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                INSERT INTO perfume (
+                    name,
+                    brand,
+                    pyramid_data,
+                    description,
+                    original_address,
+                    size,
+                    user_id
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING
+                    id,
+                    name,
+                    brand,
+                    pyramid_data,
+                    rating,
+                    description,
+                    creation_date,
+                    original_address,
+                    size;
+                """,
+                ("", "", EMPTY_PYRAMID, "", "", 0, user_id),
+            )
+            return dict(cur.fetchone())
+
+
+def create_empty_wishlist_item(user_id: int) -> dict:
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                INSERT INTO wishlist (
+                    name,
+                    brand,
+                    pyramid_data,
+                    original_address,
+                    user_id
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING
+                    id,
+                    name,
+                    brand,
+                    pyramid_data,
+                    creation_date,
+                    original_address;
+                """,
+                ("", "", EMPTY_PYRAMID, "", user_id),
+            )
+            return dict(cur.fetchone())
+
+
+def update_perfume_link(perfume_id: int, original_address: str, user_id: int) -> dict | None:
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE perfume
+                SET original_address = %s
+                WHERE id = %s AND user_id = %s
+                RETURNING
+                    id,
+                    name,
+                    brand,
+                    pyramid_data,
+                    rating,
+                    description,
+                    creation_date,
+                    original_address,
+                    size;
+                """,
+                (original_address, perfume_id, user_id),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
+def update_wishlist_link(wishlist_id: int, original_address: str, user_id: int) -> dict | None:
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE wishlist
+                SET original_address = %s
+                WHERE id = %s AND user_id = %s
+                RETURNING
+                    id,
+                    name,
+                    brand,
+                    pyramid_data,
+                    creation_date,
+                    original_address;
+                """,
+                (original_address, wishlist_id, user_id),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
 
 
 def get_all_perfumes(user_id: int) -> list[dict]:

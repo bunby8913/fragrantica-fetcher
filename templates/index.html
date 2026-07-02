@@ -44,12 +44,17 @@
             <h2>{{ 'Wishlist' if page == 'wishlist' else ('Archive' if page == 'archive' else 'My Perfume Collection') }}</h2>
             <p id="status" class="status">Loading database...</p>
           </div>
-          <label class="search-field">
-            <span class="visually-hidden">Search</span>
-            <img id="search-icon" class="search-icon" src="{{ url_for('assets', filename='Icons/search.svg') }}" alt="" aria-hidden="true">
-            <input id="table-search" type="search" placeholder="Add URLs or search by name, brand and notes." autocomplete="off">
-            <button id="search-add-button" type="button" class="search-add-button" hidden>Add</button>
-          </label>
+          <div class="table-toolbar-actions">
+            {% if page != 'archive' %}
+            <button id="add-empty-entry" class="add-empty-entry" type="button">{{ 'New Wishlist Entry' if page == 'wishlist' else 'New Entry' }}</button>
+            {% endif %}
+            <label class="search-field">
+              <span class="visually-hidden">Search</span>
+              <img id="search-icon" class="search-icon" src="{{ url_for('assets', filename='Icons/search.svg') }}" alt="" aria-hidden="true">
+              <input id="table-search" type="search" placeholder="Add URLs or search by name, brand and notes." autocomplete="off">
+              <button id="search-add-button" type="button" class="search-add-button" hidden>Add</button>
+            </label>
+          </div>
         </div>
 
         <div class="table-wrap">

@@ -12,6 +12,7 @@ const sortableHeaders = document.querySelectorAll("th.sortable");
 const logoutLink = document.querySelector("#logout-link");
 const searchIcon = document.querySelector("#search-icon");
 const searchAddButton = document.querySelector("#search-add-button");
+const addEmptyEntryButton = document.querySelector("#add-empty-entry");
 const searchIconUrl = searchIcon ? searchIcon.getAttribute("src") : "";
 const addIconUrl = searchIconUrl ? searchIconUrl.replace(/search\.svg$/i, "plus-circle.svg") : "";
 const currentPage = typeof PAGE === "string" ? PAGE : document.body.dataset.page || "library";
@@ -22,15 +23,21 @@ const api = isWishlistPage
   ? {
     getAll: "/get_wishlist",
     add: "/add_to_wishlist",
+    addEmpty: "/wishlist/empty",
     delete: (id) => `/wishlist/${id}`,
     details: (id) => `/wishlist/${id}/details`,
+    link: (id) => `/wishlist/${id}/link`,
     move: (id) => `/wishlist/${id}/move`,
+    rescrape: (id) => `/wishlist/${id}/rescrape`,
   }
   : {
     getAll: isArchivePage ? "/get_archived_perfumes" : "/get_all_perfume",
     add: "/add_perfume",
+    addEmpty: "/perfume/empty",
     delete: (id) => `/perfume/${id}`,
     details: (id) => `/perfume/${id}/details`,
+    link: (id) => `/perfume/${id}/link`,
+    rescrape: (id) => `/perfume/${id}/rescrape`,
   };
 
 const sizeLabels = {
@@ -103,6 +110,151 @@ function confirmAction({ title, message, confirmLabel = "Confirm", cancelLabel =
     document.addEventListener("keydown", handleKeydown);
     cancelButton.focus();
   });
+}
+
+function promptForLink({ title, message, placeholder = "https://example.com/perfume" }) {
+  return new Promise((resolve) => {
+    const previousFocus = document.activeElement;
+    const overlay = document.createElement("div");
+    overlay.className = "confirm-overlay";
+    overlay.innerHTML = `
+      <section class="confirm-dialog link-dialog" role="dialog" aria-modal="true" aria-labelledby="link-dialog-title" aria-describedby="link-dialog-message">
+        <div class="confirm-dialog-copy">
+          <h3 id="link-dialog-title">${escapeHtml(title)}</h3>
+          <p id="link-dialog-message">${escapeHtml(message)}</p>
+        </div>
+        <form class="link-dialog-form" novalidate>
+          <input
+            class="link-dialog-input"
+            type="text"
+            inputmode="url"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="${escapeHtml(placeholder)}"
+            aria-label="URL"
+          >
+        <div class="confirm-dialog-actions">
+          <button class="confirm-cancel-button" type="button">Cancel</button>
+          <button class="link-dialog-confirm-button" type="submit">Confirm</button>
+        </div>
+        </form>
+      </section>
+    `;
+
+    const form = overlay.querySelector(".link-dialog-form");
+    const input = overlay.querySelector(".link-dialog-input");
+    const cancelButton = overlay.querySelector(".confirm-cancel-button");
+    const confirmButton = overlay.querySelector(".link-dialog-confirm-button");
+
+    function close(result) {
+      document.removeEventListener("keydown", handleKeydown);
+      overlay.remove();
+      if (previousFocus && typeof previousFocus.focus === "function") previousFocus.focus();
+      resolve(result);
+    }
+
+    function handleKeydown(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close(null);
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = [input, cancelButton, confirmButton];
+      const currentIndex = focusable.indexOf(document.activeElement);
+      const direction = event.shiftKey ? -1 : 1;
+      const nextIndex = currentIndex === -1 ? 0 : (currentIndex + direction + focusable.length) % focusable.length;
+      event.preventDefault();
+      focusable[nextIndex].focus();
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const value = input.value.trim();
+      if (!value) {
+        input.focus();
+        return;
+      }
+      close(value);
+    });
+
+    cancelButton.addEventListener("click", () => close(null));
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) close(null);
+    });
+
+    document.body.appendChild(overlay);
+    document.addEventListener("keydown", handleKeydown);
+    input.focus();
+  });
+}
+
+async function handleOpenAction(perfume, row, actionEl) {
+  const link = (perfume.original_address || "").trim();
+  if (link) {
+    window.open(link, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  if (actionEl) actionEl.disabled = true;
+  try {
+    const url = await promptForLink({
+      title: "Add Link",
+      message: "This entry doesn't have a link yet. Paste any URL for this perfume.",
+      placeholder: "https://example.com/perfume",
+    });
+    if (!url) return;
+
+    const response = await window.Auth.authFetch(api.link(perfume.id), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const updated = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(updated.error || "Could not save link");
+    }
+
+    updatePerfumeInState(updated);
+    renderPerfumes();
+    setStatus(`Saved link for ${updated.name || updated.brand || "entry"}.`);
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    if (actionEl) actionEl.disabled = false;
+  }
+}
+
+async function createEmptyEntry(button) {
+  if (!api.addEmpty) return;
+
+  if (button) button.disabled = true;
+  try {
+    const response = await window.Auth.authFetch(api.addEmpty, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const created = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(created.error || "Could not create empty entry");
+    }
+
+    allPerfumes = [created, ...allPerfumes];
+    editingPerfumeId = created.id;
+    editingBackup = {
+      id: created.id,
+      name: created.name || "",
+      brand: created.brand || "",
+      pyramid_data: created.pyramid_data,
+    };
+    renderPerfumes();
+    setStatus(`Created a new ${isWishlistPage ? "wishlist" : "library"} entry. Fill in the details.`);
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function escapeHtml(value) {
@@ -197,18 +349,39 @@ function renderPyramidEditHTML(value) {
     .join("");
 }
 
-function csvToNotes(value) {
+function csvToNotes(value, metaLookup) {
   return String(value || "")
     .split(",")
     .map((note) => note.trim())
     .filter(Boolean)
-    .map((name) => ({ name }));
+    .map((name) => {
+      const existing = metaLookup ? metaLookup.get(name.toLowerCase()) : null;
+      if (existing && typeof existing === "object") {
+        return { ...existing, name };
+      }
+      return { name };
+    });
 }
 
-function editedPyramidFromRow(row) {
+function buildNoteMetaLookup(perfume) {
+  const lookup = new Map();
+  if (!perfume) return lookup;
+  const pyramid = parsePyramid(perfume.pyramid_data);
+  ["top_notes", "middle_notes", "base_notes"].forEach((key) => {
+    (pyramid[key] || []).forEach((note) => {
+      if (!note || !note.name) return;
+      const meta = { ...note, name: note.name };
+      lookup.set(note.name.toLowerCase(), meta);
+    });
+  });
+  return lookup;
+}
+
+function editedPyramidFromRow(row, perfume) {
+  const metaLookup = buildNoteMetaLookup(perfume);
   return ["top_notes", "middle_notes", "base_notes"].reduce((pyramid, key) => {
     const input = row.querySelector(`.edit-pyramid-input[data-key="${key}"]`);
-    pyramid[key] = csvToNotes(input ? input.value : "");
+    pyramid[key] = csvToNotes(input ? input.value : "", metaLookup);
     return pyramid;
   }, {});
 }
@@ -316,7 +489,7 @@ function columnMinWidth(header) {
   if (column === "rating") return 152;
   if (label.startsWith("pyramid")) return 280;
   if (label.startsWith("notes")) return 220;
-  if (label.startsWith("actions")) return isWishlistPage ? 268 : 136;
+  if (label.startsWith("actions")) return isWishlistPage ? 244 : 136;
 
   return 96;
 }
@@ -534,7 +707,7 @@ async function saveDetails(perfume, row, button) {
       body: JSON.stringify({
         name,
         brand,
-        pyramid_data: editedPyramidFromRow(row),
+        pyramid_data: editedPyramidFromRow(row, perfume),
       }),
     });
     const updated = await response.json();
@@ -685,6 +858,33 @@ async function deletePerfume(perfume, button) {
   }
 }
 
+async function rescrapePerfume(perfume, button) {
+  if (!api.rescrape) return;
+
+  const confirmed = await confirmAction({
+    title: "Rescrape from Fragrantica?",
+    message: `Re-fetch ${perfume.name} by ${perfume.brand || "(no brand)"} from Fragrantica. This will refresh note pictures and details while keeping your current notes.`,
+    confirmLabel: "Rescrape",
+    cancelLabel: "Cancel",
+  });
+  if (!confirmed) return;
+
+  button.disabled = true;
+  try {
+    const response = await window.Auth.authFetch(api.rescrape(perfume.id), { method: "POST" });
+    const updated = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(updated.error || "Could not rescrape perfume");
+
+    updatePerfumeInState(updated);
+    renderPerfumes();
+    setStatus(`Refreshed notes for ${updated.name}.`);
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function moveToLibrary(perfume, button) {
   button.disabled = true;
   try {
@@ -718,6 +918,13 @@ function renderPerfumeRow(perfume) {
   const editButton = `<button class="edit-button ${isEditing ? "saving-state" : "edit-icon-button"}" type="button" aria-label="${isEditing ? "Save details" : "Edit details"}">${isEditing ? "Save" : ""}</button>`;
 
   if (isWishlistPage) {
+    const hasLink = Boolean((perfume.original_address || "").trim());
+    const openAction = hasLink
+      ? `<a class="action-link" href="${escapeHtml(perfume.original_address)}" target="_blank" rel="noreferrer" aria-label="Open ${escapeHtml(perfume.name)} on Fragrantica">Open</a>`
+      : `<button class="action-link action-link-button" type="button" aria-label="Add link for ${escapeHtml(perfume.name || "this entry")}">Open</button>`;
+    const rescrapeButton = hasLink && !isEditing
+      ? `<button class="rescrape-button" type="button" aria-label="Rescrape ${escapeHtml(perfume.name || "this entry")} from Fragrantica"></button>`
+      : "";
     row.innerHTML = `
       ${nameCell}
       ${brandCell}
@@ -727,7 +934,8 @@ function renderPerfumeRow(perfume) {
             <button class="move-button" type="button">Move to Library</button>
             ${editButton}
             ${isEditing ? "" : `
-            <a class="action-link" href="${escapeHtml(perfume.original_address)}" target="_blank" rel="noreferrer" aria-label="Open ${escapeHtml(perfume.name)} on Fragrantica">Open</a>
+            ${openAction}
+            ${rescrapeButton}
             <button class="delete-button" type="button">Delete</button>
           `}
         </div>
@@ -746,6 +954,17 @@ function renderPerfumeRow(perfume) {
 
     if (isEditing) return row;
 
+    const openActionEl = row.querySelector(".action-link");
+    openActionEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      handleOpenAction(perfume, row, openActionEl);
+    });
+
+    const rescrapeButtonEl = row.querySelector(".rescrape-button");
+    if (rescrapeButtonEl) {
+      rescrapeButtonEl.addEventListener("click", () => rescrapePerfume(perfume, rescrapeButtonEl));
+    }
+
     const moveButton = row.querySelector(".move-button");
     moveButton.addEventListener("click", () => moveToLibrary(perfume, moveButton));
 
@@ -758,6 +977,13 @@ function renderPerfumeRow(perfume) {
   const note = stripHtml(perfume.description).trim();
   const size = Number(perfume.size ?? 0);
   const rating = normalizedRating(perfume.rating);
+  const hasLink = Boolean((perfume.original_address || "").trim());
+  const openAction = hasLink
+    ? `<a class="action-link" href="${escapeHtml(perfume.original_address)}" target="_blank" rel="noreferrer" aria-label="Open ${escapeHtml(perfume.name)} on Fragrantica">Open</a>`
+    : `<button class="action-link action-link-button" type="button" aria-label="Add link for ${escapeHtml(perfume.name || "this entry")}">Open</button>`;
+  const rescrapeButton = hasLink && !isEditing
+    ? `<button class="rescrape-button" type="button" aria-label="Rescrape ${escapeHtml(perfume.name || "this entry")} from Fragrantica"></button>`
+    : "";
 
   row.innerHTML = `
     ${nameCell}
@@ -795,7 +1021,8 @@ function renderPerfumeRow(perfume) {
       <div class="action-cell">
         ${editButton}
         ${isEditing ? "" : `
-          <a class="action-link" href="${escapeHtml(perfume.original_address)}" target="_blank" rel="noreferrer" aria-label="Open ${escapeHtml(perfume.name)} on Fragrantica">Open</a>
+          ${openAction}
+          ${rescrapeButton}
           <button class="delete-button" type="button">Delete</button>
         `}
       </div>
@@ -854,6 +1081,17 @@ function renderPerfumeRow(perfume) {
   sizeSelect.addEventListener("change", () => updateSize(perfume, sizeSelect));
 
   if (isEditing) return row;
+
+  const openActionEl = row.querySelector(".action-link");
+  openActionEl.addEventListener("click", (event) => {
+    event.preventDefault();
+    handleOpenAction(perfume, row, openActionEl);
+  });
+
+  const rescrapeButtonEl = row.querySelector(".rescrape-button");
+  if (rescrapeButtonEl) {
+    rescrapeButtonEl.addEventListener("click", () => rescrapePerfume(perfume, rescrapeButtonEl));
+  }
 
   const deleteButton = row.querySelector(".delete-button");
   deleteButton.addEventListener("click", () => deletePerfume(perfume, deleteButton));
@@ -1153,6 +1391,12 @@ if (searchAddButton) {
       input: searchInput,
       onReset: resetSearchInput,
     });
+  });
+}
+
+if (addEmptyEntryButton) {
+  addEmptyEntryButton.addEventListener("click", () => {
+    createEmptyEntry(addEmptyEntryButton);
   });
 }
 
